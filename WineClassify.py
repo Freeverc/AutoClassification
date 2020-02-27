@@ -1,20 +1,20 @@
-from qdarkstyle import load_stylesheet_pyqt5
 import sys
 import os
 import numpy as np
-from PIL import Image
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from sklearn import svm
 from PyQt5.QtWidgets import QApplication, QTableView, QWidget
 from PyQt5.QtCore import QAbstractTableModel, Qt
 from PyQt5.QtWidgets import QPushButton, QFileDialog, QMessageBox
-from PyQt5.QtWidgets import QComboBox, QLineEdit, QListWidget, QCheckBox, QListWidgetItem
-from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout
+from PyQt5.QtWidgets import QLabel, QComboBox, QLineEdit, QListWidget, QCheckBox, QListWidgetItem
+from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QGridLayout
+from qdarkstyle import load_stylesheet_pyqt5
 import pandas as pd
-from pandas.plotting import parallel_coordinates, radviz, andrews_curves, scatter_matrix
 from pandas.api.types import is_numeric_dtype
-import seaborn as sns
-import rpy2.robjects as robjects
+import bp
+from sklearn.preprocessing import LabelBinarizer
+from sklearn.metrics import confusion_matrix, classification_report
 
 # 原酒鉴评规则
 # TY级酒分段93分以上
@@ -30,12 +30,11 @@ class WineClassify(QWidget):
     def __init__(self):
         super().__init__()
         self.button_widget = QWidget()
-        self.figure_widget = QWidget()
+        self.main_widget = QWidget()
         self.message_box = QMessageBox()
-        self.table = QTableView()
-        # ui jiemian 0:空, 1:表格 2:图 3: 结果 4：设置
-        self.ui_state = 0
         self.figure_able = 0
+
+
         self.init_ui()
 
     def init_ui(self):
@@ -48,6 +47,16 @@ class WineClassify(QWidget):
         self.test_data = pd.DataFrame()
         self.result_data = pd.DataFrame()
 
+        self.themes = ['浅色', '深色']
+        self.theme = self.themes[0]
+        self.model = []
+        self.pca_top = 20
+        self.knn_top = 7
+        self.bp_lr = 0.2
+        self.bp_epoch = 10000
+        self.svm_types = ['ovo', 'ova']
+        self.svm_type = self.svm_types[0]
+
         self.messages = ['请导入Excel文件', '请导入包含感官鉴定的有效数据', '请点击链接', '请点击训练']
 
         self.import_methods = ['导入白酒信息', '导入训练数据', '导入测试数据']
@@ -57,13 +66,14 @@ class WineClassify(QWidget):
         self.show_data_method = self.show_data_methods[0]
 
         self.data_linked = False
+        self.data_classified = False
 
         self.figure_types = ['折线图', '条形图', '面积图']
         self.figure_type = self.figure_types[0]
         self.data_classified = False
 
-        self.classify_types = ['PCA', 'PCA-SVM', 'PCA-BP', 'sPCA-SVM', 'sPCA-BP', 'BP']
-        self.classify_type = self.classify_types[0]
+        self.classify_methods = ['KNN', 'PCA-KNN', 'SVM', 'PCA-SVM', 'BP', 'PCA-BP', 'sPCA', 'sPCA-SVM']
+        self.classify_method = self.classify_methods[0]
 
         self.wine_grades = ['特级', '一级', '二级', '优级']
         self.wine_grade = self.wine_grades[0]
@@ -90,7 +100,7 @@ class WineClassify(QWidget):
 
         self.classify_btn = QPushButton('开始分类')
         self.classify_btn.setToolTip('对数据进行分类')
-        self.classify_btn.clicked.connect(self.classify_func)
+        self.classify_btn.clicked.connect(self.start_testing)
 
         self.save_btn = QPushButton('保存')
         self.save_btn.setToolTip('保存图像或数据')
@@ -98,7 +108,7 @@ class WineClassify(QWidget):
 
         self.settint_btn = QPushButton('设置')
         self.settint_btn.setToolTip('设置显示的图像和数据格式')
-        self.settint_btn.clicked.connect(self.clear_func)
+        self.settint_btn.clicked.connect(self.setting_func)
 
         self.clear_btn = QPushButton('清空')
         self.clear_btn.setToolTip('清空图像和数据')
@@ -125,7 +135,7 @@ class WineClassify(QWidget):
 
         self.classify_type_cb = QComboBox()
         self.classify_type_cb.setToolTip('选择分类方法')
-        self.classify_type_cb.addItems(self.classify_types)
+        self.classify_type_cb.addItems(self.classify_methods)
         self.classify_type_cb.activated[str].connect(self.change_type)
 
         self.button_layout = QHBoxLayout()
@@ -141,28 +151,58 @@ class WineClassify(QWidget):
         self.button_layout.addWidget(self.classify_type_cb)
         self.button_layout.addWidget(self.settint_btn)
         self.button_layout.addWidget(self.save_btn)
-        self.button_layout.addWidget(self.clear_btn)
+        # self.button_layout.addWidget(self.clear_btn)
         self.button_layout.addWidget(self.exit_btn)
         self.button_widget.setLayout(self.button_layout)
 
+
+        self.setting_widget = Setting_widget()
+        self.setting_widget.confirm_btn.clicked.connect(self.change_setting)
+        if self.theme == self.themes[1]:
+            self.setStyleSheet(load_stylesheet_pyqt5())
+            plt.style.use('qdark_color')
+        # plt.style.use('dark_background')
         self.figure = plt.figure()
         self.ax = self.figure.add_subplot()
         self.canvas = FigureCanvas(self.figure)
+        self.table = QTableView()
 
         self.figure_layout = QHBoxLayout()
         self.figure_layout.addWidget(self.table)
-        self.figure_widget.setLayout(self.figure_layout)
+        self.figure_layout.addWidget(self.canvas)
+        self.figure_layout.addWidget(self.setting_widget)
+        self.table.setVisible(False)
+        self.canvas.setVisible(False)
+        self.setting_widget.setVisible(False)
+        # main_state 0:空, 1:表格 2:图 3: 结果 4：设置
+        self.main_state = 0
+        self.main_widget.setLayout(self.figure_layout)
+
 
         self.layout = QVBoxLayout()
         self.layout.addWidget(self.button_widget)
-        self.layout.addWidget(self.figure_widget)
+        self.layout.addWidget(self.main_widget)
         self.setLayout(self.layout)
 
         self.button_widget.setFixedHeight(60)
         self.setWindowTitle('智能白酒分析鉴定系统')
-        self.resize(1300, 800)
+        desktop = QApplication.desktop()
+        self.resize(desktop.width(), desktop.height())
         # self.move(200, 200)
         self.show()
+
+    def change_type(self, text):
+        print("changing type")
+        if self.sender() == self.import_method_cb:
+            self.import_method = text
+        elif self.sender() == self.show_data_method_cb:
+            self.show_data_method = text
+        elif self.sender() == self.figure_type_cb:
+            self.figure_type = text
+        elif self.sender() == self.classify_type_cb:
+            self.classify_method = text
+        else:
+            pass
 
     def import_data(self):
         print("importing data")
@@ -207,7 +247,7 @@ class WineClassify(QWidget):
         self.info_data = pd.read_excel("wine_i.xlsx")
         self.label_data = pd.read_excel("wine_l.xlsx")
         self.all_train_data = pd.read_excel("wine_d.xlsx")
-        self.all_test_data = pd.read_excel("wine_t.xlsx")
+        self.all_test_data = pd.read_excel("wine_d.xlsx")
         self.data_linked = False
         # self.check_data(self.all_data)
         # self.show_data(self.all_data)
@@ -266,6 +306,10 @@ class WineClassify(QWidget):
             self.test_data = self.all_test_data.loc[self.all_test_data['感官鉴定'].isin(self.wine_grades), cols]
             test_labels = [self.wine_grades.index(grade) for grade in self.test_data['感官鉴定'].values]
             self.test_data.insert(2, 'label', test_labels)
+            print(self.all_train_data.shape)
+            print(self.all_test_data.shape)
+            print(self.train_data.shape)
+            print(self.test_data.shape)
             self.show_message("数据链接成功")
 
     def show_data_slot(self):
@@ -312,14 +356,16 @@ class WineClassify(QWidget):
             model = QtTable(data)
             self.table.setModel(model)
             self.canvas.setVisible(False)
+            self.setting_widget.setVisible(False)
             self.table.setVisible(True)
-            try:
-                self.figure_layout.removeWidget(self.canvas)
-            except BaseException:
-                pass
-            else:
-                self.figure_layout.addWidget(self.table)
-                self.ui_state = 1
+            self.main_state = 1
+            # try:
+            #     self.figure_layout.removeWidget(self.canvas)
+            # except BaseException:
+            #     pass
+            # else:
+            #     self.figure_layout.addWidget(self.table)
+            #     self.ui_state = 1
 
     def figure_func(self):
         self.clear_func()
@@ -342,9 +388,10 @@ class WineClassify(QWidget):
                 data = self.test_data.iloc[:8, 3:].T
             else:
                 data = self.test_data.iloc[:, 3:].T
-            print(data)
+            # print(data)
             if self.figure_type == self.figure_types[0]:
                 data.plot(kind='line', ax=self.ax, rot=90, xticks=range(len(data.index)), fontsize=10)
+                # pass
             elif self.figure_type == self.figure_types[1]:
                 data.plot(kind='bar', ax=self.ax, fontsize=10)
             elif self.figure_type == self.figure_types[2]:
@@ -354,40 +401,88 @@ class WineClassify(QWidget):
             plt.legend(label)
 
             self.table.setVisible(False)
+            self.setting_widget.setVisible(False)
             self.canvas.setVisible(True)
-            self.figure_layout.removeWidget(self.table)
-            self.figure_layout.addWidget(self.canvas)
+            self.main_state = 2
+            # self.figure_layout.removeWidget(self.table)
+            # self.figure_layout.addWidget(self.canvas)
             self.canvas.draw()
-            self.ui_state = 2
 
     def start_training(self):
-        pass
-
-    def classify_func(self):
-        pass
-
-    def change_type(self, text):
-        print("changing type")
-        if self.sender() == self.import_method_cb:
-            self.import_method = text
-        elif self.sender() == self.show_data_method_cb:
-            self.show_data_method = text
-        elif self.sender() == self.figure_type_cb:
-            self.figure_type = text
-        elif self.sender() == self.classify_type_cb:
-            self.classify_type = text
+        self.link_data()
+        print("training")
+        # self.classify_methods = ['KNN', 'PCA-KNN', 'SVM', 'PCA-SVM', 'BP', 'sPCA', 'sPCA-SVM']
+        train_label = self.train_data.iloc[:, 2].values.tolist()
+        train_data = self.train_data.iloc[:, 3:].values
+        # start training
+        if self.classify_method == self.classify_methods[0]:
+            pass
+        elif self.classify_method == self.classify_methods[1]:
+            pass
+        elif self.classify_method == self.classify_methods[2]:
+            self.model = self.svm_train(train_data, train_label)
+        elif self.classify_method == self.classify_methods[3]:
+            lower_train_data = self.pca_train(train_data, train_label)
+            self.model = self.svm_train(lower_train_data, train_label)
+        elif self.classify_method == self.classify_methods[4]:
+            self.model = self.bp_train(train_data, train_label)
+        elif self.classify_method == self.classify_methods[5]:
+            lower_train_data = self.pca_train(train_data, train_label)
+            self.model = self.bp_train(lower_train_data, train_label)
         else:
             pass
 
+        # self.show_data(pd.DataFrame(self.lower_train_data))
+        self.show_message("训练完成")
+        self.data_classified = False
+
+    def start_testing(self):
+        print("testing")
+        if 'result' in self.test_data.columns:
+            self.test_data.drop('result', axis=1, inplace=True)
+        # self.classify_methods = ['KNN', 'PCA-KNN', 'SVM', 'PCA-SVM', 'BP', 'PCA-BP', 'sPCA', 'sPCA-SVM']
+        test_label = self.test_data.iloc[:, 2].values.tolist()
+        test_data = self.test_data.iloc[:, 3:].values
+        if self.classify_method == self.classify_methods[0]:
+            train_data = self.train_data.iloc[:, 3:].values
+            train_label = self.train_data.iloc[:, 2].values.tolist()
+            result = self.knn_test(train_data, train_label, test_data, test_label)
+        elif self.classify_method == self.classify_methods[1]:
+            train_data = self.train_data.iloc[:, 3:].values
+            train_label = self.train_data.iloc[:, 2].values.tolist()
+            lower_train_data = self.pca_train(train_data, test_label)
+            lower_test_data = self.pca_train(test_data, test_label)
+            result = self.knn_test(lower_train_data, train_label, lower_test_data, test_label)
+        elif self.classify_method == self.classify_methods[2]:
+            result = self.svm_test(test_data, test_label)
+        elif self.classify_method == self.classify_methods[3]:
+            lower_test_data = self.pca_train(test_data, test_label)
+            result = self.svm_test(lower_test_data, test_label)
+        elif self.classify_method == self.classify_methods[4]:
+            result = self.bp_test(test_data, test_label)
+        elif self.classify_method == self.classify_methods[5]:
+            lower_test_data = self.pca_train(test_data, test_label)
+            result = self.bp_test(lower_test_data, test_label)
+        else:
+            pass
+
+        self.data_classified = True
+        if 'result' in self.test_data.columns:
+            self.test_data.drop('result', axis=1, inplace=True)
+        self.test_data.insert(1, 'result', result)
+        self.precision(test_data, test_label, result)
+        # self.show_data(self.test_data)
+        self.show_message("测试完成")
+
     def save_data(self):
-        if self.figure_state == 0:
+        if self.main_state == 0:
             self.show_message("没有数据可以保存")
         else:
             file_name = QFileDialog.getSaveFileName(self, '保存文件')[0]
             try:
-                if self.figure_state == 1:
-                    self.all_train_data.to_excel(file_name)
-                elif self.figure_state == 2:
+                if self.main_state == 1:
+                    self.train_data.to_excel(file_name)
+                elif self.main_state == 2:
                     plt.savefig(file_name)
             except BaseException:
                 self.show_message("保存失败")
@@ -399,15 +494,11 @@ class WineClassify(QWidget):
         if sender == self.clear_btn:
             self.show_message("清理成功")
         print("clearing data")
-        self.ui_state = 0
+        self.main_state = 0
         self.table.setVisible(False)
         self.canvas.setVisible(False)
+        self.setting_widget.setVisible(False)
         plt.cla()
-        # plt.clf()
-        # plt.close(self.figure)
-        # self.figure = plt.figure()
-        # self.ax = self.figure.add_subplot()
-        # self.canvas = FigureCanvas(self.figure)
 
     def exit_func(self):
         print("exited")
@@ -416,11 +507,6 @@ class WineClassify(QWidget):
     def show_message(self, text):
         self.message_box.setText(text)
         self.message_box.show()
-
-
-
-    def cur_slice(self):
-        pass
 
     def check_data(self, data):
         print("checking data")
@@ -439,135 +525,148 @@ class WineClassify(QWidget):
             # print("data okk")
             self.figure_able = 1
 
-    def figure_func_old(self):
-        if len(self.all_train_data.index) == 0:
-            self.show_message('请导入采样数据')
-        elif len(self.info_data.index) == 0:
-            self.show_message('请导入采样信息')
-        elif not self.data_linked:
-            self.show_message("请点击链接")
-        elif not self.figure_able:
-            self.show_message("数据包含非数值类型，不可画图！")
-        else:
+    def pca_train(self, train_data, train_label):
+        print("pca training")
+        train_data = train_data - np.mean(train_data, axis=0)
+        cov_mat = np.cov(train_data, rowvar=0)
+        eig_vals, eig_vects = np.linalg.eig(np.mat(cov_mat))
+        # eig_val_indice = np.argsort(eig_vals)
+
+        top = self.pca_top
+        n_eig_val_indice = range(top)
+        n_eig_vects = eig_vects[:, n_eig_val_indice]
+        low_data_mat = train_data * n_eig_vects.real
+        # print('eig_vals: ', eig_vals.shape)
+        # print('eig_vects: ', eig_vects.shape)
+        # print("data", np.shape(train_data))
+        # print("data", np.shape(train_label))
+        # print("cov:", cov_mat.shape)
+        # print("eig_val_indice: ", eig_val_indice)
+        # print("n_eig_val_indice", n_eig_val_indice)
+        # print("n_eig:",n_eig_vects.shape)
+        # print("low:", low_data_mat.shape)
+        # recon_mat = (low_data_mat * eig_vects) + np.mean(train_data, axis=0)
+        # print("rec:", recon_mat.shape)
+        return low_data_mat
+
+    def knn_test(self, lower_train_data, train_label, lower_test_data, test_label):
+        print("knn testing")
+        print(lower_train_data.shape)
+        print(lower_test_data.shape)
+        result = []
+        for i in range(lower_test_data.shape[0]):
+            nearest_index = -1 * np.ones(self.knn_top)
+            nearest_class = np.ones(self.knn_top, dtype=np.int64)
+            nearest_dists = np.ones(self.knn_top) * float('inf')
+            for j in range(lower_train_data.shape[0]):
+                dist = np.sqrt(np.sum(np.square(lower_test_data[i, :] - lower_train_data[j, :])))
+                if dist < max(nearest_dists):
+                    nearest_index[np.argmax(nearest_dists)] = j
+                    nearest_class[np.argmax(nearest_dists)] = train_label[j]
+                    nearest_dists[np.argmax(nearest_dists)] = dist
+            counts = np.bincount(nearest_class)
+            result.append(np.argmax(counts))
+            # print(nearest_index)
+            # print(nearest_class)
+            # print(nearest_dists)
+            # print(len(result))
+        # print(result)
+        return result
+
+    def svm_train(self, train_data, train_label):
+        print("svm trainging")
+        clf = svm.SVC(decision_function_shape=self.svm_type)
+        print(np.shape(train_data))
+        print(np.shape(train_label))
+        # print("label: ", train_label)
+        clf.fit(train_data, train_label)
+        return clf
+
+    def svm_test(self, test_data, test_label):
+        print("svm testing")
+        print(np.shape(test_data))
+        print(np.shape(test_label))
+        result = self.model.predict(test_data)
+        # print('result', result)
+        # print(len(result))
+        # print(len(self.test_data))
+        return result
+
+    def bp_train(self, train_data, train_label):
+        print("bp training")
+        train_data = train_data - np.mean(train_data, axis=0)
+        # print(np.shape(train_data))
+        # print(np.shape(train_label))
+        # print(train_label)
+        train_label_fit = LabelBinarizer().fit_transform(train_label)
+        layers = [np.shape(train_data)[1], 100, 4]
+        nn_model = bp.NeuralNetwork(layers, 'logistic')
+        nn_model.fit(train_data, train_label_fit, learning_rate=self.bp_lr, epochs=self.bp_epoch)
+        return nn_model
+
+    def bp_test(self, test_data, test_label):
+        print("bp testing")
+        test_data = test_data - np.mean(test_data, axis=0)
+        model = self.model
+        predictions = []
+        for i in range(np.shape(test_data)[0]):
+            o = model.predict(test_data[i])
+            # np.argmax:第几个数对应最大概率值
+            predictions.append(np.argmax(o))
+        return predictions
+
+    def precision(self, test_data, test_label, results):
+        if len(test_label) > 0:
+            print(confusion_matrix(test_label, results))
+            # print(classification_report(test_label, results))
+            report = classification_report(test_label, results)
             self.clear_func()
-            self.cur_slice()
             # 解决无法显示中文
             plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
             # plt.rcParams['font.sans-serif']=['SimHei'] #指定默认字体,SimHei为黑体
             # 解决无法显示负号
             plt.rcParams['axes.unicode_minus'] = False
             plt.title(self.figure_type)
-            if self.figure_type == "主成分分析":
-                region_data = self.all_test_data.iloc[:, 0].values.tolist()
-                print(region_data)
-                regions = list(set(region_data))
-                print(regions)
-                region_color = [(int(regions.index(i) * 255 / len(regions))) for i in region_data]
-                # region_color = [regions.index[i] for i in region_data]
-                print(region_color)
-                data = self.all_test_data.iloc[:, 1:].values
-                data = data - np.mean(data, axis=0)
-                print("data",data.shape)
-                cov_mat = np.cov(data, rowvar=0)
-                print("cov:", cov_mat.shape)
-
-                eig_vals, eig_vects = np.linalg.eig(np.mat(cov_mat))
-                low_data_mat = data * eig_vects
-                print("low:", low_data_mat.shape)
-                eig_val_indice = np.argsort(eig_vals)
-
-                top = 2
-                n_eig_val_indice = range(top)
-                print("n_eig_val_indice", n_eig_val_indice)
-                n_eig_vects = eig_vects[:, n_eig_val_indice]
-                print("n_eig:",n_eig_vects.shape)
-                recon_mat = (low_data_mat * eig_vects) + np.mean(data, axis=0)
-                print("rec:", recon_mat.shape)
-                x = np.array(low_data_mat)[:, 0]
-                y = np.array(low_data_mat)[:, 1]
-                # z = np.array(low_data_mat)[:, 2]
-                for region in regions:
-                    index = [i for i, data in enumerate(region_data) if data == region]
-                    plt.scatter(x[index], y[index])
-                plt.legend(regions)
-            elif self.figure_type == '平行坐标图':
-                parallel_coordinates(self.all_test_data, self.region_method)
-            elif self.figure_type == "Andrews图":
-                colors = ['b', 'g', 'r', 'orange']
-                andrews_curves(self.all_test_data, self.region_method, color=colors)
-            elif self.figure_type == 'Radiv图':
-                radviz(self.all_test_data, self.region_method)
-            elif self.figure_type == '矩阵散点图':
-                print("绘制矩阵散点图")
-                sns.pairplot(data=self.all_test_data, hue=self.region_method)
-                f = plt.gcf()
-                self.ax = f
-                self.canvas = FigureCanvas(f)
-            elif self.figure_type == 'Chernoff脸谱图':
-                self.all_test_data.to_excel('cur_data.xlsx')
-                print("data out")
-                # goto_r()
-                os.system("python ./PyToR.py")
-                face_info = pd.read_csv('face_info.csv')
-                # f_str = face_info.to_string()
-
-                font = {'weight': 'normal',
-                         'size': 11,
-                         }
-
-                plt.text(500, 0 , "脸谱图条目                 数据列", fontdict=font)
-                for index, row in face_info.iterrows():
-                    f_str = row[0] + " : "
-                    plt.text(500, 20 + 20 * index, f_str, fontdict=font)
-                    f_str = row[1]
-                    plt.text(650, 30 + 20 * index, f_str, fontdict=font)
-                plt.imshow(Image.open('face.png'))
-                plt.gca().add_patch(plt.Rectangle(xy=(500, 20), width=100, height=300,
-                                                  edgecolor=[1, 1, 1],
-                                                  fill=False,
-                                                  linewidth=2))
-                # print("文件命名为:face.jpg")
-                # info=pd.read_csv('face_info.csv',encoding='GBK')
-                # print("effect of variables:\n{}".format(info))
-
+            # font = {'weight': 'normal',
+            #         'size': 11,
+            #         'color': 'r',
+            #         }
+            # f = self.ax
+            # f.text(10, 10, "report", fontdict=font)
+            plt.plot(range(10), range(20, 10, -1))
+            plt.text(100, 100, "report ")
             self.table.setVisible(False)
+            self.setting_widget.setVisible(False)
             self.canvas.setVisible(True)
-            self.figure_layout.removeWidget(self.table)
-            self.figure_layout.addWidget(self.canvas)
+            print(report)
             self.canvas.draw()
-            self.figure_state = 2
+            self.main_state = 2
+        else:
+            pass
 
-    def pca(self):
-        train_label = self.train_data.iloc[:, 0].values.tolist()
-        print(train_label)
-        # region_color = [(int(regions.index(i) * 255 / len(regions))) for i in region_data]
-        # region_color = [regions.index[i] for i in region_data]
-        # print(region_color)
-        data = self.train_data.iloc[:, 1:]
-        data = data - np.mean(data, axis=0)
-        print("data",data.shape)
-        cov_mat = np.cov(data, rowvar=0)
-        print("cov:", cov_mat.shape)
+    def setting_func(self):
+        self.setting_widget = Setting_widget()
+        self.setting_widget.setParent(self)
+        self.table.setVisible(False)
+        self.canvas.setVisible(False)
+        self.setting_widget.setVisible(True)
+        # self.figure_layout.removeWidget(self.table)
+        # self.figure_layout.removeWidget(self.canvas)
+        # self.figure_layout.addWidget(self.setting_widget)
+        self.main_state = 4
+        # self.setting_widget.show()
 
-        eig_vals, eig_vects = np.linalg.eig(np.mat(cov_mat))
-        low_data_mat = data * eig_vects
-        print("low:", low_data_mat.shape)
-        eig_val_indice = np.argsort(eig_vals)
-
-        top = 2
-        n_eig_val_indice = range(top)
-        print("n_eig_val_indice", n_eig_val_indice)
-        n_eig_vects = eig_vects[:, n_eig_val_indice]
-        print("n_eig:",n_eig_vects.shape)
-        recon_mat = (low_data_mat * eig_vects) + np.mean(data, axis=0)
-        print("rec:", recon_mat.shape)
-        x = np.array(low_data_mat)[:, 0]
-        y = np.array(low_data_mat)[:, 1]
-        # z = np.array(low_data_mat)[:, 2]
-        for region in regions:
-            index = [i for i, data in enumerate(region_data) if data == region]
-            plt.scatter(x[index], y[index])
-        plt.legend(regions)
+    def change_setting(self):
+        print("changing setting")
+        self.theme = self.setting_widget.theme_cb.currentText()
+        self.pca_top = self.setting_widget.pca_top_le.text()
+        self.knn_top = self.setting_widget.knn_top_le.text()
+        self.bp_lr = self.setting_widget.bp_lr_le.text()
+        self.bp_epoch = self.setting_widget.bp_epoch_le.text()
+        if self.theme == self.themes[1]:
+            self.setStyleSheet(load_stylesheet_pyqt5())
+            plt.style.use('qdark_color')
+        self.show()
 
 
 class QtTable(QAbstractTableModel):
@@ -680,26 +779,86 @@ class ComboCheckBox(QComboBox):
         self.setView(self.qListWidget)
         self.setLineEdit(self.qLineEdit)
 
-def goto_r():
-    r_script = '''
-                library(aplpack) 
-                library(openxlsx)
-                cur_data<-read.xlsx("cur_data.xlsx", sheet = 1)
-                print("read sucess")
-                # 保存图片
-                png('face.png')
-                col_num=ncol(cur_data)
-                face_model=faces(cur_data[,3:col_num],labels=cur_data[[2]])
-                dev.off()
-                # 导出数据
-                # cur_data=cur_data.frame(face_model$info)
-                # write.csv(info_data,'face_info.csv',row.names=F,col.names=F,sep='')
-               '''
-    robjects.r(r_script)
+class Setting_widget(QWidget):
+    def __init__(self):
+        super().__init__()
+        # settings self.themes
+        self.parent_widget = None
+        self.themes = ['浅色', '深色']
+        self.theme = self.themes[1]
+        self.theme_cb = QComboBox()
+        self.theme_cb.setStatusTip("选择主题")
+        self.theme_cb.addItems(self.themes)
+        self.pca_top_le = QLineEdit()
+        self.pca_top_le.setPlaceholderText("请输入PCA参数（默认为10）")
+        self.knn_top_le = QLineEdit()
+        self.knn_top_le.setPlaceholderText("请输入KNN参数（默认为7）")
+        self.svm_types = ['ovo', 'ova']
+        self.svm_type = self.svm_types[0]
+        self.svm_type_cb = QComboBox()
+        self.svm_type_cb.addItems(self.svm_types)
+        self.svm_type_cb.setToolTip("请选择SVM种类（默认为ovo)")
+        self.bp_lr_le = QLineEdit()
+        self.bp_lr_le.setPlaceholderText("请输入BP-learning rate参数（默认为0.2）")
+        self.bp_epoch_le = QLineEdit()
+        self.bp_epoch_le.setPlaceholderText("请输入BP-epoch参数（默认为10000）")
+        self.confirm_btn = QPushButton("确认")
+        self.confirm_btn.clicked.connect(self.change_setting)
+        self.cancel_btn = QPushButton("取消")
+        self.reset_btn = QPushButton("恢复默认")
+        self.theme_label = QLabel("主题")
+        self.pca_label = QLabel("PCA")
+        self.knn_label = QLabel("KNN")
+        self.svm_label = QLabel("SVM")
+        self.bp_label = QLabel("BP")
 
+        self.setting_layout = QGridLayout()
+        self.setting_layout.addWidget(self.theme_label, 1, 0)
+        self.setting_layout.addWidget(self.pca_label, 3, 0)
+        self.setting_layout.addWidget(self.knn_label, 4, 0)
+        self.setting_layout.addWidget(self.svm_label, 5, 0)
+        self.setting_layout.addWidget(self.bp_label, 6, 0)
+        self.setting_layout.addWidget(self.confirm_btn, 1, 8)
+        self.setting_layout.addWidget(self.cancel_btn, 2, 8)
+        self.setting_layout.addWidget(self.reset_btn, 3, 8)
+        self.setting_layout.addWidget(self.theme_cb, 1, 2)
+        self.setting_layout.addWidget(self.pca_top_le, 3, 2)
+        self.setting_layout.addWidget(self.knn_top_le, 4, 2)
+        self.setting_layout.addWidget(self.svm_type_cb, 5, 2)
+        self.setting_layout.addWidget(self.bp_lr_le, 6, 2)
+        self.setting_layout.addWidget(self.bp_epoch_le, 6, 3)
+        self.setting_layout.setRowStretch(0, 1)
+        self.setting_layout.setRowStretch(1, 1)
+        self.setting_layout.setRowStretch(2, 1)
+        self.setting_layout.setRowStretch(3, 1)
+        self.setting_layout.setRowStretch(4, 1)
+        self.setting_layout.setRowStretch(5, 1)
+        self.setting_layout.setRowStretch(6, 1)
+        self.setting_layout.setRowStretch(7, 1)
+        self.setting_layout.setRowStretch(8, 1)
+        self.setting_layout.setColumnStretch(0,2)
+        self.setting_layout.setColumnStretch(1,2)
+        self.setting_layout.setColumnStretch(2,6)
+        self.setting_layout.setColumnStretch(3,6)
+        self.setting_layout.setColumnStretch(4,2)
+        self.setting_layout.setColumnStretch(5,2)
+        self.setting_layout.setColumnStretch(6,2)
+        self.setting_layout.setColumnStretch(7,2)
+        self.setting_layout.setColumnStretch(8,2)
+        self.setLayout(self.setting_layout)
+        self.resize(800, 600)
+        # self.setStyleSheet("background-color:grey;")
+        self.show()
+
+    def change_setting(self):
+        print("s:changing setting ")
+
+
+def change_theme():
+    pass
 
 if  __name__ == '__main__':
     app = QApplication(sys.argv)
-    # app.setStyleSheet(load_stylesheet_pyqt5())
-    DV = WineClassify()
+    WC = WineClassify()
+    # SW = Setting_widget()
     sys.exit(app.exec_())
