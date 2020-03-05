@@ -4,10 +4,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from sklearn import svm
-from PyQt5.QtWidgets import QApplication, QTableView, QWidget
+from PyQt5.QtWidgets import QApplication, QTableView, QWidget, QStyleFactory
 from PyQt5.QtCore import QAbstractTableModel, Qt
 from PyQt5.QtWidgets import QPushButton, QFileDialog, QMessageBox
-from PyQt5.QtWidgets import QLabel, QComboBox, QLineEdit, QListWidget, QCheckBox, QListWidgetItem
+from PyQt5.QtWidgets import QLabel, QComboBox, QLineEdit, QListWidget, QCheckBox, QListWidgetItem, QTableWidget
 from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QGridLayout
 from qdarkstyle import load_stylesheet_pyqt5
 import pandas as pd
@@ -27,13 +27,12 @@ from sklearn.metrics import confusion_matrix, classification_report
 #
 
 class WineClassify(QWidget):
-    def __init__(self):
+    def __init__(self, app):
         super().__init__()
         self.button_widget = QWidget()
         self.main_widget = QWidget()
         self.message_box = QMessageBox()
         self.figure_able = 0
-
 
         self.init_ui()
 
@@ -156,8 +155,7 @@ class WineClassify(QWidget):
         self.button_widget.setLayout(self.button_layout)
 
 
-        self.setting_widget = Setting_widget()
-        self.setting_widget.confirm_btn.clicked.connect(self.change_setting)
+        self.setting_widget = Setting_widget(self)
         if self.theme == self.themes[1]:
             self.setStyleSheet(load_stylesheet_pyqt5())
             plt.style.use('qdark_color')
@@ -222,18 +220,18 @@ class WineClassify(QWidget):
                 else:
                     # self.import_methods = ['导入白酒信息', '导入训练数据', '导入测试数据']
                     if self.import_method == self.import_methods[0]:
-                        self.show_message("已" + self.import_method)
-                        self.data_linked = False
-                        self.label_data = self.input_data
-                        self.show_data(self.label_data)
-                    elif self.import_method == self.import_methods[1]:
                         if '感官鉴定' in self.input_data.columns:
                             self.show_message("已" + self.import_method)
                             self.data_linked = False
-                            self.all_train_data = self.input_data
+                            self.label_data = self.input_data
                             self.show_data(self.all_train_data)
                         else:
                             self.show_message("请导入包含感官鉴定的白酒信息")
+                    elif self.import_method == self.import_methods[1]:
+                        self.show_message("已" + self.import_method)
+                        self.data_linked = False
+                        self.all_train_data = self.input_data
+                        self.show_data(self.label_data)
                     elif self.import_method == self.import_methods[2]:
                         self.show_message("已" + self.import_method)
                         self.data_linked = False
@@ -252,9 +250,9 @@ class WineClassify(QWidget):
         # self.check_data(self.all_data)
         # self.show_data(self.all_data)
         #
-        if len(self.all_train_data.index) == 0:
+        if  len(self.label_data.index) == 0:
             self.show_message("请" + self.import_methods[0])
-        elif len(self.label_data.index) == 0:
+        elif len(self.all_train_data.index) == 0:
             self.show_message("请" + self.import_methods[1])
         elif len(self.all_test_data.index) == 0:
             self.show_message("请" + self.import_methods[2])
@@ -264,7 +262,7 @@ class WineClassify(QWidget):
         else:
             for i in range(1, self.label_data.shape[1]):
                 col = self.label_data.columns.tolist()[i]
-                # all_data
+                # train_data
                 if col in self.all_train_data.columns:
                     self.all_train_data.drop(col, axis=1, inplace=True)
                 values = []
@@ -332,16 +330,12 @@ class WineClassify(QWidget):
 
         # self.messages[0] = '请点击链接'
         elif self.show_data_method == self.show_data_methods[3]:
-            if len(self.train_data.index) == 0:
-                self.show_message(self.messages[2])
-            elif not self.data_linked:
+            if not self.data_linked:
                 self.show_message(self.messages[2])
             else:
                 self.show_data(self.train_data)
         elif self.show_data_method == self.show_data_methods[4]:
-            if len(self.test_data.index) == 0:
-                self.show_message(self.messages[2])
-            elif not self.data_linked:
+            if not self.data_linked:
                 self.show_message(self.messages[2])
             else:
                 self.show_data(self.test_data)
@@ -502,7 +496,8 @@ class WineClassify(QWidget):
 
     def exit_func(self):
         print("exited")
-        sys.exit(app.exec_())
+        self.close()
+        # sys.exit(app.exec_())
 
     def show_message(self, text):
         self.message_box.setText(text)
@@ -645,8 +640,6 @@ class WineClassify(QWidget):
             pass
 
     def setting_func(self):
-        self.setting_widget = Setting_widget()
-        self.setting_widget.setParent(self)
         self.table.setVisible(False)
         self.canvas.setVisible(False)
         self.setting_widget.setVisible(True)
@@ -657,17 +650,53 @@ class WineClassify(QWidget):
         # self.setting_widget.show()
 
     def change_setting(self):
-        print("changing setting")
+        print("changing settings")
         self.theme = self.setting_widget.theme_cb.currentText()
         self.pca_top = self.setting_widget.pca_top_le.text()
         self.knn_top = self.setting_widget.knn_top_le.text()
         self.bp_lr = self.setting_widget.bp_lr_le.text()
         self.bp_epoch = self.setting_widget.bp_epoch_le.text()
-        if self.theme == self.themes[1]:
+        self.svm_type = self.setting_widget.svm_type_cb.currentText()
+        print(self.theme, self.pca_top, self.knn_top, self.svm_type, self.bp_lr, self.bp_epoch)
+        if self.theme == self.themes[0]:
+            self.setStyle(QStyleFactory.create("Macintosh"))
+            plt.cla()
+            plt.style.use('qwhite_color')
+            plt.gcf().set_facecolor('white')
+            plt.gca().set_facecolor('white')
+        elif self.theme == self.themes[1]:
             self.setStyleSheet(load_stylesheet_pyqt5())
+            # QApplication.setStyle(QStyleFactory.create("Fusion"))
+            plt.cla()
             plt.style.use('qdark_color')
+            plt.gcf().set_facecolor('#19232d')
+            plt.gca().set_facecolor('#19232d')
         self.show()
 
+    def reset_setting(self):
+        print("reseting settings")
+        self.theme = self.themes[0]
+        self.model = []
+        self.pca_top = 20
+        self.knn_top = 7
+        self.bp_lr = 0.2
+        self.bp_epoch = 10000
+        self.svm_type = self.svm_types[0]
+        print(self.theme, self.pca_top, self.knn_top, self.svm_type, self.bp_lr, self.bp_epoch)
+        if self.theme == self.themes[0]:
+            self.setStyle(QStyleFactory.create("Macintosh"))
+            plt.cla()
+            plt.style.use('qwhite_color')
+            plt.gcf().set_facecolor('white')
+            plt.gca().set_facecolor('white')
+        elif self.theme == self.themes[1]:
+            self.setStylesheet(load_stylesheet_pyqt5())
+            # QApplication.setStyle(QStyleFactory.create("Fusion"))
+            plt.cla()
+            plt.style.use('qdark_color')
+            plt.gcf().set_facecolor('#19232d')
+            plt.gca().set_facecolor('#19232d')
+        self.show()
 
 class QtTable(QAbstractTableModel):
     def __init__(self, data):
@@ -780,10 +809,10 @@ class ComboCheckBox(QComboBox):
         self.setLineEdit(self.qLineEdit)
 
 class Setting_widget(QWidget):
-    def __init__(self):
+    def __init__(self, parent):
         super().__init__()
         # settings self.themes
-        self.parent_widget = None
+        self.parent_widget = parent
         self.themes = ['浅色', '深色']
         self.theme = self.themes[1]
         self.theme_cb = QComboBox()
@@ -803,30 +832,34 @@ class Setting_widget(QWidget):
         self.bp_epoch_le = QLineEdit()
         self.bp_epoch_le.setPlaceholderText("请输入BP-epoch参数（默认为10000）")
         self.confirm_btn = QPushButton("确认")
-        self.confirm_btn.clicked.connect(self.change_setting)
+        self.confirm_btn.clicked.connect(self.parent_widget.change_setting)
         self.cancel_btn = QPushButton("取消")
+        self.confirm_btn.clicked.connect(self.parent_widget.change_setting)
         self.reset_btn = QPushButton("恢复默认")
+        self.reset_btn.clicked.connect(self.parent_widget.reset_setting)
         self.theme_label = QLabel("主题")
-        self.pca_label = QLabel("PCA")
-        self.knn_label = QLabel("KNN")
-        self.svm_label = QLabel("SVM")
-        self.bp_label = QLabel("BP")
+        self.pca_label = QLabel("PCA 主成分数量")
+        self.knn_label = QLabel("KNN 最近邻数量")
+        self.svm_label = QLabel("SVM 多分类模型类型")
+        self.bp_lr_label = QLabel("BP:learning rate")
+        self.bp_epoch_label = QLabel("BP:epoch")
 
         self.setting_layout = QGridLayout()
-        self.setting_layout.addWidget(self.theme_label, 1, 0)
-        self.setting_layout.addWidget(self.pca_label, 3, 0)
-        self.setting_layout.addWidget(self.knn_label, 4, 0)
-        self.setting_layout.addWidget(self.svm_label, 5, 0)
-        self.setting_layout.addWidget(self.bp_label, 6, 0)
+        self.setting_layout.addWidget(self.theme_label, 1, 2)
+        self.setting_layout.addWidget(self.pca_label, 3, 2)
+        self.setting_layout.addWidget(self.knn_label, 4, 2)
+        self.setting_layout.addWidget(self.svm_label, 5, 2)
+        self.setting_layout.addWidget(self.bp_lr_label, 6, 2)
+        self.setting_layout.addWidget(self.bp_epoch_label, 7, 2)
         self.setting_layout.addWidget(self.confirm_btn, 1, 8)
         self.setting_layout.addWidget(self.cancel_btn, 2, 8)
         self.setting_layout.addWidget(self.reset_btn, 3, 8)
-        self.setting_layout.addWidget(self.theme_cb, 1, 2)
-        self.setting_layout.addWidget(self.pca_top_le, 3, 2)
-        self.setting_layout.addWidget(self.knn_top_le, 4, 2)
-        self.setting_layout.addWidget(self.svm_type_cb, 5, 2)
-        self.setting_layout.addWidget(self.bp_lr_le, 6, 2)
-        self.setting_layout.addWidget(self.bp_epoch_le, 6, 3)
+        self.setting_layout.addWidget(self.theme_cb, 1, 3)
+        self.setting_layout.addWidget(self.pca_top_le, 3, 3)
+        self.setting_layout.addWidget(self.knn_top_le, 4, 3)
+        self.setting_layout.addWidget(self.svm_type_cb, 5, 3)
+        self.setting_layout.addWidget(self.bp_lr_le, 6, 3)
+        self.setting_layout.addWidget(self.bp_epoch_le, 7, 3)
         self.setting_layout.setRowStretch(0, 1)
         self.setting_layout.setRowStretch(1, 1)
         self.setting_layout.setRowStretch(2, 1)
@@ -836,29 +869,26 @@ class Setting_widget(QWidget):
         self.setting_layout.setRowStretch(6, 1)
         self.setting_layout.setRowStretch(7, 1)
         self.setting_layout.setRowStretch(8, 1)
+        self.setting_layout.setRowStretch(9, 1)
+        self.setting_layout.setRowStretch(10, 1)
         self.setting_layout.setColumnStretch(0,2)
         self.setting_layout.setColumnStretch(1,2)
         self.setting_layout.setColumnStretch(2,6)
-        self.setting_layout.setColumnStretch(3,6)
-        self.setting_layout.setColumnStretch(4,2)
+        self.setting_layout.setColumnStretch(3,3)
+        self.setting_layout.setColumnStretch(4,3)
         self.setting_layout.setColumnStretch(5,2)
         self.setting_layout.setColumnStretch(6,2)
         self.setting_layout.setColumnStretch(7,2)
         self.setting_layout.setColumnStretch(8,2)
+        self.setting_layout.setColumnStretch(9,2)
+        self.setting_layout.setColumnStretch(10,2)
         self.setLayout(self.setting_layout)
         self.resize(800, 600)
-        # self.setStyleSheet("background-color:grey;")
-        self.show()
+        # self.show()
 
-    def change_setting(self):
-        print("s:changing setting ")
-
-
-def change_theme():
-    pass
 
 if  __name__ == '__main__':
     app = QApplication(sys.argv)
-    WC = WineClassify()
-    # SW = Setting_widget()
+    WC = WineClassify(app)
+    print("running")
     sys.exit(app.exec_())

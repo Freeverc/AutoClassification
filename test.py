@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 
-
 # 定义tanh函数
 def tanh(x):
     return np.tanh(x)
@@ -97,41 +96,44 @@ class NeuralNetwork:
         return a
 
 
-from sklearn.preprocessing import LabelBinarizer
-from sklearn.metrics import confusion_matrix, classification_report
+# from sklearn.preprocessing import LabelBinarizer
+# from sklearn.metrics import confusion_matrix, classification_report
+#
+#
+# all_train_data = pd.read_excel("train_data.xlsx")
+#
+# train_label = all_train_data.iloc[:, 3].values.tolist()
+# train_data = all_train_data.iloc[:, 4:].values
+# train_data = train_data - np.mean(train_data, axis=0)
+#
+# print(np.shape(train_data))
+# print(np.shape(train_label))
+# print(train_label)
+# train_label_fit = LabelBinarizer().fit_transform(train_label)
+# layers = [30, 50, 4]
+# nn = NeuralNetwork(layers, 'logistic')
+# nn.fit(train_data, train_label_fit)
+#
+#
+# predictions = []
+# for i in range(np.shape(train_data)[0]):
+#     o = nn.predict(train_data[i])
+#     # np.argmax:第几个数对应最大概率值
+#     predictions.append(np.argmax(o))
+#
+# print(np.shape(predictions))
+# print(np.shape(train_label))
+# # 打印预测相关信息
+# print(confusion_matrix(train_label, predictions))
+# print(classification_report(train_label, predictions))
+# darkgray
+# # nn = NeuralNetwork([2, 2, 1], 'tanh')
+# # temp = [[0, 0], [0, 1], [1, 0], [1, 1]]
+# # X = np.array(temp)
+# # y = np.array([0, 1, 1, 0])
+# # nn.fit(X, y)
+# # for i in temp:
+# #     print(i, nn.predict(i))
 
-
-all_train_data = pd.read_excel("train_data.xlsx")
-
-train_label = all_train_data.iloc[:, 3].values.tolist()
-train_data = all_train_data.iloc[:, 4:].values
-train_data = train_data - np.mean(train_data, axis=0)
-
-print(np.shape(train_data))
-print(np.shape(train_label))
-print(train_label)
-train_label_fit = LabelBinarizer().fit_transform(train_label)
-layers = [30, 50, 4]
-nn = NeuralNetwork(layers, 'logistic')
-nn.fit(train_data, train_label_fit)
-
-
-predictions = []
-for i in range(np.shape(train_data)[0]):
-    o = nn.predict(train_data[i])
-    # np.argmax:第几个数对应最大概率值
-    predictions.append(np.argmax(o))
-
-print(np.shape(predictions))
-print(np.shape(train_label))
-# 打印预测相关信息
-print(confusion_matrix(train_label, predictions))
-print(classification_report(train_label, predictions))
-
-# nn = NeuralNetwork([2, 2, 1], 'tanh')
-# temp = [[0, 0], [0, 1], [1, 0], [1, 1]]
-# X = np.array(temp)
-# y = np.array([0, 1, 1, 0])
-# nn.fit(X, y)
-# for i in temp:
-#     print(i, nn.predict(i))
+from PyQt5.QtWidgets import QStyleFactory
+print(QStyleFactory.keys())
