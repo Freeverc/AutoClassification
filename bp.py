@@ -29,6 +29,7 @@ class NeuralNetwork:
         :param activation: 使用的函数（默认tanh函数）
         :return:none
         """
+        self.trained = False
         if activation == 'logistic':
             self.activation = logistic
             self.activation_deriv = logistic_derivative
@@ -80,8 +81,12 @@ class NeuralNetwork:
                 delta = np.atleast_2d(deltas[i])
                 self.weights[i] += learning_rate * layer.T.dot(delta)
 
+        self.trained = True
+
     def predict(self, x):
         x = np.array(x)
+        # x = x.flatten()
+        # print("x : ", x.shape)
         temp = np.ones(x.shape[0] + 1)
         temp[0:-1] = x
         a = temp
