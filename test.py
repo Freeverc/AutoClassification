@@ -100,11 +100,6 @@ class NeuralNetwork:
 # from sklearn.metrics import confusion_matrix, classification_report
 #
 #
-# all_train_data = pd.read_excel("train_data.xlsx")
-#
-# train_label = all_train_data.iloc[:, 3].values.tolist()
-# train_data = all_train_data.iloc[:, 4:].values
-# train_data = train_data - np.mean(train_data, axis=0)
 #
 # print(np.shape(train_data))
 # print(np.shape(train_label))
@@ -135,5 +130,17 @@ class NeuralNetwork:
 # # for i in temp:
 # #     print(i, nn.predict(i))
 
-from PyQt5.QtWidgets import QStyleFactory
-print(QStyleFactory.keys())
+# from PyQt5.QtWidgets import QStyleFactory
+# print(QStyleFactory.keys())
+from  sklearn.decomposition import SparsePCA
+
+all_train_data = pd.read_excel("data\\train_data.xlsx")
+
+train_label = all_train_data.iloc[:, 3].values.tolist()
+train_data = all_train_data.iloc[:, 4:].values
+train_data = train_data - np.mean(train_data, axis=0)
+transformer = SparsePCA(n_components=5, random_state=0)
+transformer.fit(train_data)
+lower_spca_data = transformer.transform(train_data)
+print(np.shape(lower_spca_data))
+print(type(lower_spca_data))

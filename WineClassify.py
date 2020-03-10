@@ -1,20 +1,22 @@
+#-*- coding : utf-8-*-
+#
 import sys
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from sklearn import svm
-from PyQt5.QtWidgets import QApplication, QTableView, QWidget, QStyleFactory
 from PyQt5.QtCore import QAbstractTableModel, Qt
+from PyQt5.QtWidgets import QApplication, QTableView, QWidget
 from PyQt5.QtWidgets import QPushButton, QFileDialog, QMessageBox
-from PyQt5.QtWidgets import QLabel, QComboBox, QLineEdit, QListWidget, QCheckBox, QListWidgetItem, QTableWidget
+from PyQt5.QtWidgets import QLabel, QComboBox, QLineEdit, QListWidget, QCheckBox, QListWidgetItem
 from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QGridLayout
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
 import bp
+from sklearn import svm
 from sklearn.preprocessing import LabelBinarizer
 from sklearn.metrics import confusion_matrix, classification_report
-from qdarkstyle import load_stylesheet_pyqt5
+from sklearn.decomposition import SparsePCA
 
 # 原酒鉴评规则
 # TY级酒分段93分以上
@@ -27,7 +29,7 @@ from qdarkstyle import load_stylesheet_pyqt5
 #
 
 class WineClassify(QWidget):
-    def __init__(self, app):
+    def __init__(self):
         super().__init__()
         self.button_widget = QWidget()
         self.main_widget = QWidget()
@@ -45,6 +47,7 @@ class WineClassify(QWidget):
         self.all_test_data = pd.DataFrame()
         self.test_data = pd.DataFrame()
         self.result_data = pd.DataFrame()
+        self.test_has_label = False
 
         # self.theme = self.themes[0]
         # self.model = []
@@ -72,8 +75,8 @@ class WineClassify(QWidget):
         self.model_trained = False
         self.data_classified = False
 
-        # self.classify_methods = ['KNN', 'PCA-KNN', 'SVM', 'PCA-SVM', 'BP', 'PCA-BP', 'sPCA', 'sPCA-SVM']
-        self.classify_methods = ['KNN', 'PCA-KNN', 'SVM', 'PCA-SVM', 'BP', 'PCA-BP']
+        self.classify_methods = ['KNN', 'PCA-KNN', 'sPCA-KNN', 'SVM', 'PCA-SVM', 'sPCA-SVM', 'BP', 'PCA-BP', 'sPCA-BP']
+        # self.classify_methods = ['KNN', 'PCA-KNN', 'SVM', 'PCA-SVM', 'BP', 'PCA-BP']
         self.classify_method = self.classify_methods[0]
 
         self.wine_grades = ['特级', '一级', '二级', '优级']
@@ -208,7 +211,7 @@ class WineClassify(QWidget):
             self.show_message(self.messages[0])
         else:
             try:
-                self.input_data = pd.read_excel(file_name)
+                self.input_data = pd.read_excel(file_name, encoding="utf-8")
             except BaseException:
                 self.show_message("数据读取失败")
             else:
@@ -236,15 +239,16 @@ class WineClassify(QWidget):
                         self.data_linked = False
                         self.all_test_data = self.input_data
                         self.show_data(self.all_test_data)
+                        # self.test_has_label = False
                     else:
                         pass
 
     def link_data(self):
         print("linking data")
-        # self.info_data = pd.read_excel("data\\wine_i.xlsx")
+        self.info_data = pd.read_excel("data\\wine_i.xlsx")
         self.label_data = pd.read_excel("data\\wine_l.xlsx")
-        self.all_train_data = pd.read_excel("data\\wine_d.xlsx")
-        self.all_test_data = pd.read_excel("data\\wine_d.xlsx")
+        self.all_train_data = pd.read_excel("data\\wine_train.xlsx")
+        self.all_test_data = pd.read_excel("data\\wine_test.xlsx")
         self.data_linked = False
         # self.check_data(self.all_data)
         # self.show_data(self.all_data)
@@ -259,8 +263,9 @@ class WineClassify(QWidget):
             self.show_message("数据已链接")
             pass
         else:
+            cols = self.label_data.columns.tolist()
             for i in range(1, self.label_data.shape[1]):
-                col = self.label_data.columns.tolist()[i]
+                col = cols[i]
                 # train_data
                 if col in self.all_train_data.columns:
                     self.all_train_data.drop(col, axis=1, inplace=True)
@@ -413,7 +418,8 @@ class WineClassify(QWidget):
         # self.link_data()
         self.model = []
         print("training")
-        # self.classify_methods = ['KNN', 'PCA-KNN', 'SVM', 'PCA-SVM', 'BP', 'sPCA', 'sPCA-SVM']
+        # self.classify_methods =
+        # ['KNN', 'PCA-KNN', 'sPCA-KNN', 'SVM', 'PCA-SVM', 'sPCA-SVM', 'BP', 'PCA-BP', 'sPCA-BP']
         train_label = self.train_data.iloc[:, 2].values.tolist()
         train_data = self.train_data.iloc[:, 3:].values
         # start training
@@ -422,14 +428,24 @@ class WineClassify(QWidget):
         elif self.classify_method == self.classify_methods[1]:
             pass
         elif self.classify_method == self.classify_methods[2]:
-            self.model = self.svm_train(train_data, train_label)
+            pass
         elif self.classify_method == self.classify_methods[3]:
-            lower_train_data = self.pca_train(train_data, train_label)
-            self.model = self.svm_train(lower_train_data, train_label)
+            self.model = self.svm_train(train_data, train_label)
         elif self.classify_method == self.classify_methods[4]:
-            self.model = self.bp_train(train_data, train_label)
+            lower_train_data = self.pca_train(train_data)
+            self.model = self.svm_train(lower_train_data, train_label)
         elif self.classify_method == self.classify_methods[5]:
-            lower_train_data = self.pca_train(train_data, train_label)
+            lower_train_data = self.spca_train(train_data)
+            self.model = self.svm_train(lower_train_data, train_label)
+        elif self.classify_method == self.classify_methods[6]:
+            self.model = self.bp_train(train_data, train_label)
+        elif self.classify_method == self.classify_methods[7]:
+            lower_train_data = self.pca_train(train_data)
+            self.model = self.bp_train(lower_train_data, train_label)
+            print(type(train_data))
+            print(type(lower_train_data))
+        elif self.classify_method == self.classify_methods[8]:
+            lower_train_data = self.spca_train(train_data)
             self.model = self.bp_train(lower_train_data, train_label)
             print(type(train_data))
             print(type(lower_train_data))
@@ -449,28 +465,37 @@ class WineClassify(QWidget):
         print("testing")
         if 'results' in self.test_data.columns:
             self.test_data.drop('results', axis=1, inplace=True)
-        # self.classify_methods = ['KNN', 'PCA-KNN', 'SVM', 'PCA-SVM', 'BP', 'PCA-BP', 'sPCA', 'sPCA-SVM']
+        # self.classify_methods =
+        # ['KNN', 'PCA-KNN', 'sPCA-KNN', 'SVM', 'PCA-SVM', 'sPCA-SVM', 'BP', 'PCA-BP', 'sPCA-BP']
         test_label = self.test_data.iloc[:, 2].values.tolist()
         test_data = self.test_data.iloc[:, 3:].values
+        train_data = self.train_data.iloc[:, 3:].values
+        train_label = self.train_data.iloc[:, 2].values.tolist()
         if self.classify_method == self.classify_methods[0]:
-            train_data = self.train_data.iloc[:, 3:].values
-            train_label = self.train_data.iloc[:, 2].values.tolist()
             results = self.knn_test(train_data, train_label, test_data)
         elif self.classify_method == self.classify_methods[1]:
-            train_data = self.train_data.iloc[:, 3:].values
-            train_label = self.train_data.iloc[:, 2].values.tolist()
-            lower_train_data = self.pca_train(train_data, test_label)
-            lower_test_data = self.pca_train(test_data, test_label)
+            lower_train_data = self.pca_train(train_data)
+            lower_test_data = self.pca_train(test_data)
             results = self.knn_test(lower_train_data, train_label, lower_test_data)
         elif self.classify_method == self.classify_methods[2]:
-            results = self.svm_test(test_data, test_label)
+            lower_train_data = self.pca_train(train_data)
+            lower_test_data = self.pca_train(test_data)
+            results = self.knn_test(lower_train_data, train_label, lower_test_data)
         elif self.classify_method == self.classify_methods[3]:
-            lower_test_data = self.pca_train(test_data, test_label)
-            results = self.svm_test(lower_test_data, test_label)
+            results = self.svm_test(test_data, test_label)
         elif self.classify_method == self.classify_methods[4]:
-            results = self.bp_test(test_data, test_label)
+            lower_test_data = self.pca_train(test_data)
+            results = self.svm_test(lower_test_data, test_label)
         elif self.classify_method == self.classify_methods[5]:
-            lower_test_data = self.pca_train(test_data, test_label)
+            lower_test_data = self.spca_train(test_data)
+            results = self.svm_test(lower_test_data, test_label)
+        elif self.classify_method == self.classify_methods[6]:
+            results = self.bp_test(test_data, test_label)
+        elif self.classify_method == self.classify_methods[7]:
+            lower_test_data = self.pca_train(test_data)
+            results = self.bp_test(lower_test_data, test_label)
+        elif self.classify_method == self.classify_methods[8]:
+            lower_test_data = self.spca_train(test_data)
             results = self.bp_test(lower_test_data, test_label)
         else:
             pass
@@ -536,7 +561,7 @@ class WineClassify(QWidget):
             # print("data okk")
             self.figure_able = 1
 
-    def pca_train(self, train_data, train_label):
+    def pca_train(self, train_data):
         print("pca training")
         train_data -= np.mean(train_data, axis=0)
         # train_data -= np.min(train_data)
@@ -565,6 +590,13 @@ class WineClassify(QWidget):
         # recon_mat = (low_data_mat * eig_vects) + np.mean(train_data, axis=0)
         # print("rec:", recon_mat.shape)
         return low_data_mat
+
+    def spca_train(self, train_data):
+        transformer = SparsePCA(n_components=self.pca_top, random_state=0)
+        transformer.fit(train_data)
+        lower_spca_data = transformer.transform(train_data)
+        return lower_spca_data
+
 
     def knn_test(self, train_data, train_label, test_data):
         print("knn testing")
@@ -943,6 +975,6 @@ class Setting_widget(QWidget):
 
 if  __name__ == '__main__':
     app = QApplication(sys.argv)
-    WC = WineClassify(app)
+    WC = WineClassify()
     print("running")
     sys.exit(app.exec_())
