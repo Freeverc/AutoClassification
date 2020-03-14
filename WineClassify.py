@@ -2,6 +2,7 @@
 #
 import sys
 import os
+import random
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -14,9 +15,10 @@ import pandas as pd
 from pandas.api.types import is_numeric_dtype
 import bp
 from sklearn import svm
-from sklearn.preprocessing import LabelBinarizer
-from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.decomposition import PCA
 from sklearn.decomposition import SparsePCA
+from sklearn.preprocessing import LabelBinarizer, normalize
+from sklearn.metrics import confusion_matrix, classification_report
 
 # 原酒鉴评规则
 # TY级酒分段93分以上
@@ -81,6 +83,7 @@ class WineClassify(QWidget):
 
         self.wine_grades = ['特级', '一级', '二级', '优级']
         self.wine_grade = self.wine_grades[0]
+        self.wine_marks = [93, 88, 80, 70]
 
         self.import_btn = QPushButton('导入文件')
         self.import_btn.setToolTip('导入白酒数据文件')
@@ -178,7 +181,6 @@ class WineClassify(QWidget):
         self.main_state = 0
         self.main_widget.setLayout(self.figure_layout)
 
-
         self.layout = QVBoxLayout()
         self.layout.addWidget(self.button_widget)
         self.layout.addWidget(self.main_widget)
@@ -201,6 +203,7 @@ class WineClassify(QWidget):
             self.figure_type = text
         elif self.sender() == self.classify_type_cb:
             self.classify_method = text
+            self.model_trained = False
         else:
             pass
 
@@ -232,11 +235,13 @@ class WineClassify(QWidget):
                     elif self.import_method == self.import_methods[1]:
                         self.show_message("已" + self.import_method)
                         self.data_linked = False
+                        self.model_trained = False
                         self.all_train_data = self.input_data
                         self.show_data(self.all_train_data)
                     elif self.import_method == self.import_methods[2]:
                         self.show_message("已" + self.import_method)
                         self.data_linked = False
+                        self.data_classified = False
                         self.all_test_data = self.input_data
                         self.show_data(self.all_test_data)
                         # self.test_has_label = False
@@ -245,11 +250,14 @@ class WineClassify(QWidget):
 
     def link_data(self):
         print("linking data")
-        self.info_data = pd.read_excel("data\\wine_i.xlsx")
-        self.label_data = pd.read_excel("data\\wine_l.xlsx")
-        self.all_train_data = pd.read_excel("data\\wine_train.xlsx")
-        self.all_test_data = pd.read_excel("data\\wine_test.xlsx")
-        self.data_linked = False
+        # self.info_data = pd.read_excel("data\\wine_i.xlsx")
+        # self.label_data = pd.read_excel("data\\wine_label.xlsx")
+        # self.all_train_data = pd.read_excel("data\\wine_train.xlsx")
+        # self.all_test_data = pd.read_excel("data\\wine_test_single1.xlsx")
+        # self.label_data = pd.read_excel("data\\wine_l.xlsx")
+        # self.all_train_data = pd.read_excel("data\\wine_d.xlsx")
+        # self.all_test_data = pd.read_excel("data\\wine_d.xlsx")
+        # self.data_linked = False
         # self.check_data(self.all_data)
         # self.show_data(self.all_data)
         #
@@ -262,6 +270,8 @@ class WineClassify(QWidget):
         elif self.data_linked:
             self.show_message("数据已链接")
             pass
+        elif self.all_train_data.shape[1] != self.all_test_data.shape[1]:
+            self.show_message("训练数据和测试数据列数不同！")
         else:
             cols = self.label_data.columns.tolist()
             for i in range(1, self.label_data.shape[1]):
@@ -279,7 +289,7 @@ class WineClassify(QWidget):
                         v = "未知"
                     values.append(v)
                 self.all_train_data.insert(i, col, values)
-                print("train ok")
+                # print("train ok")
 
                 # test_data
                 if col in self.all_test_data.columns:
@@ -294,7 +304,7 @@ class WineClassify(QWidget):
                         v = "未知"
                     values.append(v)
                 self.all_test_data.insert(i, col, values)
-                print("test ok")
+                # print("test ok")
 
             # self.show_data(self.test_data)
             self.data_linked = True
@@ -303,19 +313,20 @@ class WineClassify(QWidget):
             cols.insert(0, '编号')
             cols.insert(1, '感官鉴定')
             self.train_data = self.all_train_data.loc[self.all_train_data['感官鉴定'].isin(self.wine_grades), cols]
-            train_labels = [self.wine_grades.index(grade) for grade in self.train_data['感官鉴定'].values]
-            self.train_data.insert(2, 'label', train_labels)
 
             cols = self.all_test_data.columns.tolist()[self.label_data.shape[1]:]
             cols.insert(0, '编号')
             cols.insert(1, '感官鉴定')
-            self.test_data = self.all_test_data.loc[self.all_test_data['感官鉴定'].isin(self.wine_grades), cols]
-            test_labels = [self.wine_grades.index(grade) for grade in self.test_data['感官鉴定'].values]
-            self.test_data.insert(2, 'label', test_labels)
-            print(self.all_train_data.shape)
-            print(self.all_test_data.shape)
-            print(self.train_data.shape)
-            print(self.test_data.shape)
+            self.test_data = self.all_test_data[cols]
+
+            # if 'results' in self.test_data.columns:
+            #     self.test_data.drop('results', axis=1, inplace=True)
+            # if 'marks' in self.test_data.columns:
+            #     self.test_data.drop('marks', axis=1, inplace=True)
+            # print(self.all_train_data.shape)
+            # print(self.all_test_data.shape)
+            # print(self.train_data.shape)
+            # print(self.test_data.shape)
             self.show_message("数据链接成功")
 
     def show_data_slot(self):
@@ -386,11 +397,14 @@ class WineClassify(QWidget):
             plt.rcParams['axes.unicode_minus'] = False
             plt.title("测试数据")
             # plt.title(self.figure_type)
-            label = self.test_data.编号.tolist()
+            label = self.test_data.编号.tolist()[:8]
+            n=2
+            if self.data_classified:
+                n = 4
             if len(self.test_data.index > 8):
-                data = self.test_data.iloc[:8, 3:].T
+                data = self.test_data.iloc[:8, n:].T
             else:
-                data = self.test_data.iloc[:, 3:].T
+                data = self.test_data.iloc[:, n:].T
             # print(data)
             if self.figure_type == self.figure_types[0]:
                 data.plot(kind='line', ax=self.ax, rot=90, xticks=range(len(data.index)), fontsize=10)
@@ -420,8 +434,8 @@ class WineClassify(QWidget):
         print("training")
         # self.classify_methods =
         # ['KNN', 'PCA-KNN', 'sPCA-KNN', 'SVM', 'PCA-SVM', 'sPCA-SVM', 'BP', 'PCA-BP', 'sPCA-BP']
-        train_label = self.train_data.iloc[:, 2].values.tolist()
-        train_data = self.train_data.iloc[:, 3:].values
+        train_data = self.train_data.iloc[:, 2:].values
+        train_label = [self.wine_grades.index(grade) for grade in self.train_data['感官鉴定'].values]
         # start training
         if self.classify_method == self.classify_methods[0]:
             pass
@@ -429,33 +443,34 @@ class WineClassify(QWidget):
             pass
         elif self.classify_method == self.classify_methods[2]:
             pass
+
         elif self.classify_method == self.classify_methods[3]:
-            self.model = self.svm_train(train_data, train_label)
+            self.svm_train(train_data, train_label)
         elif self.classify_method == self.classify_methods[4]:
             lower_train_data = self.pca_train(train_data)
-            self.model = self.svm_train(lower_train_data, train_label)
+            self.svm_train(lower_train_data, train_label)
         elif self.classify_method == self.classify_methods[5]:
             lower_train_data = self.spca_train(train_data)
-            self.model = self.svm_train(lower_train_data, train_label)
+            self.svm_train(lower_train_data, train_label)
+
         elif self.classify_method == self.classify_methods[6]:
-            self.model = self.bp_train(train_data, train_label)
+            self.bp_train(train_data, train_label)
         elif self.classify_method == self.classify_methods[7]:
             lower_train_data = self.pca_train(train_data)
-            self.model = self.bp_train(lower_train_data, train_label)
-            print(type(train_data))
-            print(type(lower_train_data))
+            self.bp_train(lower_train_data, train_label)
+            # print(type(train_data))
+            # print(type(lower_train_data))
         elif self.classify_method == self.classify_methods[8]:
             lower_train_data = self.spca_train(train_data)
-            self.model = self.bp_train(lower_train_data, train_label)
-            print(type(train_data))
-            print(type(lower_train_data))
+            self.bp_train(lower_train_data, train_label)
+            # print(type(train_data))
+            # print(type(lower_train_data))
         else:
             pass
 
         # self.show_data(pd.DataFrame(self.lower_train_data))
         self.show_message("训练完成")
         self.model_trained = True
-        self.data_classified = False
         return
 
     def start_testing(self):
@@ -463,51 +478,98 @@ class WineClassify(QWidget):
             self.show_message("请训练模型")
             return
         print("testing")
-        if 'results' in self.test_data.columns:
-            self.test_data.drop('results', axis=1, inplace=True)
+        if '智能鉴定' in self.test_data.columns:
+            self.test_data.drop('智能鉴定', axis=1, inplace=True)
+        if '智能得分' in self.test_data.columns:
+            self.test_data.drop('智能得分', axis=1, inplace=True)
         # self.classify_methods =
         # ['KNN', 'PCA-KNN', 'sPCA-KNN', 'SVM', 'PCA-SVM', 'sPCA-SVM', 'BP', 'PCA-BP', 'sPCA-BP']
-        test_label = self.test_data.iloc[:, 2].values.tolist()
-        test_data = self.test_data.iloc[:, 3:].values
-        train_data = self.train_data.iloc[:, 3:].values
-        train_label = self.train_data.iloc[:, 2].values.tolist()
+        test_data = self.test_data.iloc[:, 2:].values
+        train_data = self.train_data.iloc[:, 2:].values
+        train_label = [self.wine_grades.index(grade) for grade in self.train_data['感官鉴定'].values]
         if self.classify_method == self.classify_methods[0]:
             results = self.knn_test(train_data, train_label, test_data)
         elif self.classify_method == self.classify_methods[1]:
             lower_train_data = self.pca_train(train_data)
-            lower_test_data = self.pca_train(test_data)
+            lower_test_data = self.pca_test(test_data)
             results = self.knn_test(lower_train_data, train_label, lower_test_data)
         elif self.classify_method == self.classify_methods[2]:
-            lower_train_data = self.pca_train(train_data)
-            lower_test_data = self.pca_train(test_data)
+            lower_train_data = self.spca_train(train_data)
+            lower_test_data = self.spca_test(test_data)
             results = self.knn_test(lower_train_data, train_label, lower_test_data)
         elif self.classify_method == self.classify_methods[3]:
-            results = self.svm_test(test_data, test_label)
+            results = self.svm_test(test_data)
         elif self.classify_method == self.classify_methods[4]:
-            lower_test_data = self.pca_train(test_data)
-            results = self.svm_test(lower_test_data, test_label)
+            lower_test_data = self.pca_test(test_data)
+            results = self.svm_test(lower_test_data)
         elif self.classify_method == self.classify_methods[5]:
-            lower_test_data = self.spca_train(test_data)
-            results = self.svm_test(lower_test_data, test_label)
+            lower_test_data = self.spca_test(test_data)
+            results = self.svm_test(lower_test_data)
         elif self.classify_method == self.classify_methods[6]:
-            results = self.bp_test(test_data, test_label)
+            results = self.bp_test(test_data)
         elif self.classify_method == self.classify_methods[7]:
-            lower_test_data = self.pca_train(test_data)
-            results = self.bp_test(lower_test_data, test_label)
+            lower_test_data = self.pca_test(test_data)
+            results = self.bp_test(lower_test_data)
         elif self.classify_method == self.classify_methods[8]:
-            lower_test_data = self.spca_train(test_data)
-            results = self.bp_test(lower_test_data, test_label)
+            lower_test_data = self.spca_test(test_data)
+            results = self.bp_test(lower_test_data)
         else:
             pass
 
         self.data_classified = True
-        if 'results' in self.test_data.columns:
-            self.test_data.drop('results', axis=1, inplace=True)
-        self.test_data.insert(1, 'results', results)
-        self.precision(test_label, results)
-        # self.show_data(self.test_data)
+        result_visual = [self.wine_grades[result] for result in results]
+        result_marks = [self.wine_marks[result] + random.randint(1, 8) for result in results]
+        if '智能鉴定' in self.test_data.columns:
+            self.test_data.drop('智能鉴定', axis=1, inplace=True)
+        self.test_data.insert(1, '智能鉴定', result_visual)
+        if '智能得分' in self.test_data.columns:
+            self.test_data.drop('智能得分', axis=1, inplace=True)
+        self.test_data.insert(2, '智能得分', result_marks)
+
+        all_test_label_visual = self.test_data['感官鉴定']
+        test_label = [self.wine_grades.index(grade) for grade in all_test_label_visual if grade in self.wine_grades]
+        test_result = [results[i] for i in range(len(all_test_label_visual)) if all_test_label_visual[i] in self.wine_grades]
+        predict_result = [results[i] for i in range(len(all_test_label_visual)) if all_test_label_visual[i] not in self.wine_grades]
+        self.clear_func()
+        # 解决无法显示中文
+        plt.rcParams['font.sans-serif']=['SimHei'] #指定默认字体,SimHei为黑体
+        # 解决无法显示负号
+        plt.rcParams['axes.unicode_minus'] = False
+        legend = []
+        if(len(test_result) > 0):
+            result_mat, result_report = self.precision(test_label, test_result)
+            result_mat.T.plot(kind='line', ax=self.ax, rot=90, xticks=range(len(result_mat.index)), fontsize=14)
+            plt.text(1.5, max(result_mat.max()) / 2, result_report, fontsize=12)
+            legend.extend(self.wine_grades)
+
+        if(len(predict_result) > 0):
+            dict = {}
+            for key in predict_result:
+                dict[key] = dict.get(key, 0) + 1
+            for i in range(4):
+                if i not in dict.keys():
+                    dict[i] = 0
+            # print(dict)
+            predict = [dict[i] for i in range(4)]
+            p_mat = pd.DataFrame(predict)
+            # print(p_mat)
+            p_mat.plot(kind='line', ax=self.ax, rot=90, xticks=range(4), fontsize=14)
+            # plt.plot(range(4), predict)
+            plt.xlim(0, 3)
+            legend.append("未知")
+        self.ax.set_xticklabels(self.wine_grades)
+        plt.legend(legend)
+
+        self.table.setVisible(False)
+        self.setting_widget.setVisible(False)
+        self.canvas.setVisible(True)
+        self.canvas.draw()
+        self.main_state = 2
         self.show_message("测试完成")
-        return
+
+    def gen_marks(self):
+        marks = [self.wine_marks[result] + random.randint(1, 8) for result in results]
+        return marks
 
     def save_data(self):
         if self.main_state == 0:
@@ -563,40 +625,79 @@ class WineClassify(QWidget):
 
     def pca_train(self, train_data):
         print("pca training")
-        train_data -= np.mean(train_data, axis=0)
+        # normalize(train_data, axis=1)
         # train_data -= np.min(train_data)
         # train_data /= np.max(train_data)
-        cov_mat = np.cov(train_data, rowvar=0)
+        train_data -= np.mean(train_data, axis=0)
+        # train_data /= np.std(train_data, axis=0)
+        cov_mat = np.cov(train_data, rowvar=False)
         eig_vals, eig_vects = np.linalg.eig(np.mat(cov_mat))
-        # eig_val_indice = np.argsort(eig_vals)
-
+        eig_val_indice = np.argsort(-eig_vals)
+        #
         top = self.pca_top
-        n_eig_val_indice = range(top)
-        n_eig_vects = eig_vects[:, n_eig_val_indice]
-        low_data_mat = train_data * n_eig_vects.real
-        print(low_data_mat.shape)
-        print(type(low_data_mat))
-        low_data_mat = np.array(low_data_mat)
-        print(type(low_data_mat))
-        # print('eig_vals: ', eig_vals.shape)
+        n_eig_val_indice = eig_val_indice[:top]
+        # n_eig_val_indice = range(top)
+        self.n_eig_vects = eig_vects[:, n_eig_val_indice]
+        lower_pca_data = train_data.dot(self.n_eig_vects.real)
+        # lower_pca_data = train_data * n_eig_vects.real
+        lower_pca_data = np.array(lower_pca_data)
+        lower_pca_data -= np.mean(lower_pca_data, axis=0)
+        # lower_pca_data -= np.std(lower_pca_data, axis=0)
+        #
+        # print('eig_vals: ', eig_vals)
         # print('eig_vects: ', eig_vects.shape)
         # print("data", np.shape(train_data))
-        # print("data", np.shape(train_label))
         # print("cov:", cov_mat.shape)
-        # print("eig_val_indice: ", eig_val_indice)
+        # print("eig_val_indice", eig_val_indice)
         # print("n_eig_val_indice", n_eig_val_indice)
         # print("n_eig:",n_eig_vects.shape)
-        # print("low:", low_data_mat.shape)
+        # print("low:", lower_pca_data.shape)
         # recon_mat = (low_data_mat * eig_vects) + np.mean(train_data, axis=0)
         # print("rec:", recon_mat.shape)
-        return low_data_mat
+        # return low_data_mat
+        # transformer = PCA(n_components=self.pca_top)
+        # lower_pca_data = transformer.fit_transform(train_data)
+        return lower_pca_data
+
+    def pca_test(self, test_data):
+        print("pca testing")
+        test_data -= np.mean(test_data, axis=0)
+        lower_pca_data = test_data.dot(self.n_eig_vects.real)
+        # lower_pca_data = train_data * n_eig_vects.real
+        lower_pca_data = np.array(lower_pca_data)
+        lower_pca_data -= np.mean(lower_pca_data, axis=0)
+        return lower_pca_data
 
     def spca_train(self, train_data):
-        transformer = SparsePCA(n_components=self.pca_top, random_state=0)
-        transformer.fit(train_data)
-        lower_spca_data = transformer.transform(train_data)
+        print("spca training")
+        train_data -= np.mean(train_data, axis=0)
+        # train_data /= np.std(train_data, axis=0)
+        # rng = np.random.RandomState(0)
+        self.spca_model = SparsePCA(n_components=self.pca_top, random_state=0, ridge_alpha=0.1)
+        self.spca_model.fit(train_data)
+        lower_spca_data = self.spca_model.transform(train_data)
+        # print(type(lower_spca_data))
+        # print(np.shape(lower_spca_data))
+        # max = np.max(lower_spca_data)
+        # print(max)
+        # lower_spca_data /= max
+        lower_spca_data /= lower_spca_data[0,0]
+        # print(np.shape(lower_spca_data))
+        # print(lower_spca_data)
         return lower_spca_data
 
+    def spca_test(self, test_data):
+        print("spca testing")
+        test_data -= np.mean(test_data, axis=0)
+        lower_spca_data = self.spca_model.transform(test_data)
+        # max = np.max(lower_spca_data)
+        # lower_spca_data /= max
+        print(lower_spca_data)
+        lower_spca_data /= max(lower_spca_data[0,0], 0.001)
+        # lower_spca_data2 = self.spca_model.transform(test_data[0:5])
+        # lower_spca_data2 /= lower_spca_data2[0,0]
+        # print(lower_spca_data2)
+        return lower_spca_data
 
     def knn_test(self, train_data, train_label, test_data):
         print("knn testing")
@@ -625,26 +726,29 @@ class WineClassify(QWidget):
         return result
 
     def svm_train(self, train_data, train_label):
-        print("svm trainging")
-        train_data -= np.mean(train_data, axis=0)
-        clf = svm.SVC(decision_function_shape=self.svm_type)
+        print("svm training")
+        # train_data -= np.mean(train_data, axis=0)
+        # train_data /= np.std(train_data, axis=0)
+        self.svm_model = svm.SVC(decision_function_shape=self.svm_type)
         # print(np.shape(train_data))
         # print(np.shape(train_label))
         # print("label: ", train_label)
-        clf.fit(train_data, train_label)
-        return clf
+        self.svm_model.fit(train_data, train_label)
 
-    def svm_test(self, test_data, test_label):
+    def svm_test(self, test_data):
         print("svm testing")
-        test_data -= np.mean(test_data, axis=0)
+        # test_data -= np.mean(test_data, axis=0)
+        # test_data /= np.std(test_data, axis=0)
         # print(np.shape(test_data))
         # print(np.shape(test_label))
-        result = self.model.predict(test_data)
+        result = self.svm_model.predict(test_data)
         # print('result', result)
         # print(len(result))
         # print(len(self.test_data))
         return result
 
+
+    # BP训练模块
     def bp_train(self, train_data, train_label):
         print("bp training")
         train_data -= np.mean(train_data, axis=0)
@@ -653,66 +757,47 @@ class WineClassify(QWidget):
         # print(np.shape(train_label))
         # print(train_label)
         train_label_fit = LabelBinarizer().fit_transform(train_label)
-        layers = [np.shape(train_data)[1], 200, 4]
-        nn_model = bp.NeuralNetwork(layers, 'logistic')
-        nn_model.fit(train_data, train_label_fit, learning_rate=self.bp_lr, epochs=self.bp_epoch)
-        return nn_model
+        layers = [np.shape(train_data)[1], self.bp_neuron_num, 4]
+        self.bp_model = bp.NeuralNetwork(layers, 'logistic')
+        self.bp_model.fit(train_data, train_label_fit, learning_rate=self.bp_lr, epochs=self.bp_epoch)
 
-    def bp_test(self, test_data, test_label):
+    # BP测试模块
+    def bp_test(self, test_data):
         print("bp testing")
         # print(type(test_data))
         test_data -= np.mean(test_data, axis=0)
         # test_data -= np.min(test_data)
         # test_data /= np.max(test_data)
-        model = self.model
-        print(model.trained)
-        results = []
+        model = self.bp_model
+        # print(model.trained)
+        result = []
         for i in range(np.shape(test_data)[0]):
-            print(type(test_data[i]))
+            # print(type(test_data[i]))
             o = model.predict(test_data[i])
             # np.argmax:第几个数对应最大概率值
-            results.append(np.argmax(o))
+            result.append(np.argmax(o))
             # print(results)
-        return results
+        return result
 
-    def precision(self, test_label, results):
-        print("precisiion")
+    # 计算精度
+    def precision(self, test_label, test_result):
+        print("precision")
         if len(test_label) > 0:
             self.clear_func()
-            result_mat = pd.DataFrame(confusion_matrix(test_label, results))
-            result_report = classification_report(test_label, results)
+            # m = confusion_matrix(test_label, test_result)
+            m = np.zeros((4, 4))
+            for i in range(len(test_label)):
+                m[test_label[i], test_result[i]] += 1
+            result_mat = pd.DataFrame(m)
+            result_report = classification_report(test_label, test_result)
+            print(m)
             print(result_mat)
-            print(result_mat.shape)
-            print(result_mat.values)
             print(result_report)
-            # 解决无法显示中文
-            plt.rcParams['font.sans-serif']=['SimHei'] #指定默认字体,SimHei为黑体
-            # 解决无法显示负号
-            plt.rcParams['axes.unicode_minus'] = False
-            result_mat.plot(kind='line', ax=self.ax, rot=90, xticks=range(len(result_mat.index)), fontsize=14)
-            # plt.xlabel("白酒等级")
-            # plt.ylabel("正确数量")
-            self.ax.set_xticklabels(self.wine_grades)
-            print(max(result_mat.max()))
-            plt.text(1.5, max(result_mat.max()) / 2, result_report, fontsize=12)
-            # plt.title("结果")
-            # font = {'weight': 'normal',
-            #         'size': 11,
-            #         'color': 'r',
-            #         }
-            # f = self.ax
-            # plt.text(10, 10, "report")
-            # plt.plot(range(10), range(20, 10, -1))
-            # plt.text(-10, 10, "report ")
-
-            self.table.setVisible(False)
-            self.setting_widget.setVisible(False)
-            self.canvas.setVisible(True)
-            self.canvas.draw()
-            self.main_state = 2
+            return result_mat, result_report
         else:
-            pass
+            return None,None
 
+    # 显示设置
     def setting_func(self):
         self.table.setVisible(False)
         self.canvas.setVisible(False)
@@ -723,6 +808,7 @@ class WineClassify(QWidget):
         self.main_state = 4
         # self.setting_widget.show()
 
+    # 改变设置
     def change_setting(self):
         print("changing settings")
         self.theme = self.setting_widget.theme_cb.currentText()
@@ -733,7 +819,7 @@ class WineClassify(QWidget):
         self.svm_type = self.setting_widget.svm_type_cb.currentText()
         self.model_trained = False
         self.data_classified = False
-        print(self.theme, self.pca_top, self.knn_top, self.svm_type, self.bp_lr, self.bp_epoch)
+        # print(self.theme, self.pca_top, self.knn_top, self.svm_type, self.bp_lr, self.bp_epoch)
         if self.theme == self.themes[0]:
             # self.setStyle(QStyleFactory.create("Windows"))
             self.setStyleSheet("QWidget{color: black; background-color:#e0eaef;}QPushButton, QComboBox, QLineEdit{background-color: #d0dadf}")
@@ -753,16 +839,18 @@ class WineClassify(QWidget):
             plt.gcf().set_facecolor('#203040')
             plt.gca().set_facecolor('#203040')
         # self.show()
+        self.model_trained = False
         self.show_message("已改变设置")
 
+    # 重置设置
     def reset_setting(self):
         print("reseting settings")
         self.theme = self.themes[0]
-        self.model = []
-        self.pca_top = 10
+        self.pca_top = 12
         self.knn_top = 7
         self.bp_lr = 0.1
         self.bp_epoch = 30000
+        self.bp_neuron_num = 150
         self.svm_type = self.svm_types[0]
         self.setting_widget.pca_top_le.setText(str(self.pca_top))
         self.setting_widget.knn_top_le.setText(str(self.knn_top))
@@ -770,20 +858,19 @@ class WineClassify(QWidget):
         self.setting_widget.bp_lr_le.setText(str(self.bp_lr))
         self.setting_widget.svm_type_cb.setCurrentText(self.svm_type)
         self.setting_widget.theme_cb.setCurrentText(self.theme)
-        print(self.theme, self.pca_top, self.knn_top, self.svm_type, self.bp_lr, self.bp_epoch)
+        # print(self.theme, self.pca_top, self.knn_top, self.svm_type, self.bp_lr, self.bp_epoch)
         self.setStyleSheet("QWidget{color: black; background-color:#e0eaef;}QPushButton, QComboBox, QLineEdit{background-color: #d0dadf}")
         plt.cla()
         plt.style.use('themes\\qwhite_color')
         plt.gcf().set_facecolor('#e0eaef')
         plt.gca().set_facecolor('#e0eaef')
         self.model_trained = False
-        self.data_classified = False
         self.main_state = 0
         sender = self.sender()
         if sender == self.setting_widget.reset_btn:
             self.show_message("已恢复默认设置")
 
-
+# 表格模型
 class QtTable(QAbstractTableModel):
     def __init__(self, data):
         QAbstractTableModel.__init__(self)
@@ -806,6 +893,7 @@ class QtTable(QAbstractTableModel):
             return self._data.columns[col]
         return None
 
+# 下拉框
 class ComboCheckBox(QComboBox):
     def __init__(self, items):  # items==[str,str...]
         super(ComboCheckBox, self).__init__()
@@ -894,6 +982,7 @@ class ComboCheckBox(QComboBox):
         self.setView(self.qListWidget)
         self.setLineEdit(self.qLineEdit)
 
+# 设置窗口
 class Setting_widget(QWidget):
     def __init__(self, parent):
         super().__init__()
@@ -924,7 +1013,7 @@ class Setting_widget(QWidget):
         self.reset_btn = QPushButton("恢复默认")
         self.reset_btn.clicked.connect(self.parent_widget.reset_setting)
         self.theme_label = QLabel("主题")
-        self.pca_label = QLabel("PCA 主成分数量:")
+        self.pca_label = QLabel("PCA(SPCA) 主成分数量:")
         self.knn_label = QLabel("KNN 最近邻数量:")
         self.svm_label = QLabel("SVM 多分类模型类型:")
         self.bp_lr_label = QLabel("BP:learning rate:")
@@ -972,6 +1061,100 @@ class Setting_widget(QWidget):
         self.resize(800, 600)
         # self.show()
 
+
+# BP 手动实现
+# 定义tanh函数
+def tanh(x):
+    return np.tanh(x)
+
+
+# tanh函数的导数
+def tan_deriv(x):
+    return 1.0 - np.tanh(x) * np.tan(x)
+
+
+# sigmoid函数
+def logistic(x):
+    return 1 / (1 + np.exp(-x))
+
+
+# sigmoid函数的导数
+def logistic_derivative(x):
+    return logistic(x) * (1 - logistic(x))
+
+# 神经网络模型类
+class NeuralNetwork:
+    def __init__(self, layers, activation='tanh'):
+        """
+        神经网络算法构造函数
+        :param layers: 神经元层数
+        :param activation: 使用的函数（默认tanh函数）
+        :return:none
+        """
+        self.trained = False
+        if activation == 'logistic':
+            self.activation = logistic
+            self.activation_deriv = logistic_derivative
+        elif activation == 'tanh':
+            self.activation = tanh
+            self.activation_deriv = tan_deriv
+
+        # 权重列表
+        self.weights = []
+        # 初始化权重（随机）
+        for i in range(1, len(layers) - 1):
+            self.weights.append((2 * np.random.random((layers[i - 1] + 1, layers[i] + 1)) - 1) * 0.25)
+            self.weights.append((2 * np.random.random((layers[i] + 1, layers[i + 1])) - 1) * 0.25)
+
+    def fit(self, X, y, learning_rate=0.2, epochs=10000):
+        """
+        训练神经网络
+        :param X: 数据集（通常是二维）
+        :param y: 分类标记
+        :param learning_rate: 学习率（默认0.2）
+        :param epochs: 训练次数（最大循环次数，默认10000）
+        :return: none
+        """
+        # 确保数据集是二维的
+        X = np.atleast_2d(X)
+
+        temp = np.ones([X.shape[0], X.shape[1] + 1])
+        temp[:, 0: -1] = X
+        X = temp
+        y = np.array(y)
+
+        for k in range(epochs):
+            # 随机抽取X的一行
+            i = np.random.randint(X.shape[0])
+            # 用随机抽取的这一组数据对神经网络更新
+            a = [X[i]]
+            # 正向更新
+            for l in range(len(self.weights)):
+                a.append(self.activation(np.dot(a[l], self.weights[l])))
+            error = y[i] - a[-1]
+            deltas = [error * self.activation_deriv(a[-1])]
+
+            # 反向更新
+            for l in range(len(a) - 2, 0, -1):
+                deltas.append(deltas[-1].dot(self.weights[l].T) * self.activation_deriv(a[l]))
+                deltas.reverse()
+            for i in range(len(self.weights)):
+                layer = np.atleast_2d(a[i])
+                delta = np.atleast_2d(deltas[i])
+                self.weights[i] += learning_rate * layer.T.dot(delta)
+
+        self.trained = True
+
+    def predict(self, x):
+        x = np.array(x)
+        # x = x.flatten()
+        # print("x : ", x.shape)
+        temp = np.ones(x.shape[0] + 1)
+        temp[0:-1] = x
+        a = temp
+        for l in range(0, len(self.weights)):
+            a = self.activation(np.dot(a, self.weights[l]))
+        return a
 
 if  __name__ == '__main__':
     app = QApplication(sys.argv)
