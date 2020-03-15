@@ -7,18 +7,26 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from PyQt5.QtCore import QAbstractTableModel, Qt
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QTableView, QWidget
 from PyQt5.QtWidgets import QPushButton, QFileDialog, QMessageBox
 from PyQt5.QtWidgets import QLabel, QComboBox, QLineEdit, QListWidget, QCheckBox, QListWidgetItem
 from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QGridLayout
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
-import bp
 from sklearn import svm
-from sklearn.decomposition import PCA
 from sklearn.decomposition import SparsePCA
-from sklearn.preprocessing import LabelBinarizer, normalize
-from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.datasets import make_moons, make_circles, make_classification
+from sklearn.neural_network import MLPClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.gaussian_process import GaussianProcessClassifier
+from sklearn.gaussian_process.kernels import RBF
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
+from sklearn.metrics import classification_report
 
 # 原酒鉴评规则
 # TY级酒分段93分以上
@@ -72,12 +80,15 @@ class WineClassify(QWidget):
         self.data_linked = False
         self.data_classified = False
 
-        self.figure_types = ['折线图', '条形图', '面积图']
-        self.figure_type = self.figure_types[0]
+        self.test_figure_types = ['折线图', '条形图', '面积图']
+        self.result_figure_types = ['折线图', '散点图']
+        self.test_figure_type = self.test_figure_types[0]
+        self.result_figure_type = self.result_figure_types[0]
         self.model_trained = False
         self.data_classified = False
 
-        self.classify_methods = ['KNN', 'PCA-KNN', 'sPCA-KNN', 'SVM', 'PCA-SVM', 'sPCA-SVM', 'BP', 'PCA-BP', 'sPCA-BP']
+        self.classify_methods = ['KNN', 'PCA-KNN', 'sPCA-KNN', 'SVM',
+                                 'PCA-SVM', 'sPCA-SVM', 'BP', 'PCA-BP', 'sPCA-BP', 'Desition Tree']
         # self.classify_methods = ['KNN', 'PCA-KNN', 'SVM', 'PCA-SVM', 'BP', 'PCA-BP']
         self.classify_method = self.classify_methods[0]
 
@@ -135,10 +146,15 @@ class WineClassify(QWidget):
         self.show_data_method_cb.addItems(self.show_data_methods)
         self.show_data_method_cb.activated[str].connect(self.change_type)
 
-        self.figure_type_cb = QComboBox()
-        self.figure_type_cb.setToolTip('选择可视化绘图方法')
-        self.figure_type_cb.addItems(self.figure_types)
-        self.figure_type_cb.activated[str].connect(self.change_type)
+        self.test_figure_type_cb = QComboBox()
+        self.test_figure_type_cb.setToolTip('选择可视化绘图方法')
+        self.test_figure_type_cb.addItems(self.test_figure_types)
+        self.test_figure_type_cb.activated[str].connect(self.change_type)
+
+        self.result_figure_type_cb = QComboBox()
+        self.result_figure_type_cb.setToolTip('选择结果可视化方法')
+        self.result_figure_type_cb.addItems(self.result_figure_types)
+        self.result_figure_type_cb.activated[str].connect(self.change_type)
 
         self.classify_type_cb = QComboBox()
         self.classify_type_cb.setToolTip('选择分类方法')
@@ -152,10 +168,11 @@ class WineClassify(QWidget):
         self.button_layout.addWidget(self.show_data_btn)
         self.button_layout.addWidget(self.show_data_method_cb)
         self.button_layout.addWidget(self.figure_btn)
-        self.button_layout.addWidget(self.figure_type_cb)
+        self.button_layout.addWidget(self.test_figure_type_cb)
         self.button_layout.addWidget(self.train_btn)
         self.button_layout.addWidget(self.classify_btn)
         self.button_layout.addWidget(self.classify_type_cb)
+        # self.button_layout.addWidget(self.result_figure_type_cb)
         self.button_layout.addWidget(self.settint_btn)
         self.button_layout.addWidget(self.save_btn)
         self.button_layout.addWidget(self.clear_btn)
@@ -187,7 +204,8 @@ class WineClassify(QWidget):
         self.setLayout(self.layout)
 
         self.button_widget.setFixedHeight(60)
-        self.setWindowTitle('智能白酒分析鉴定系统')
+        self.setWindowTitle('基酒等级智能鉴定系统')
+        self.setWindowIcon(QIcon('themes\\wine.ico'))
         desktop = QApplication.desktop()
         self.resize(desktop.width(), desktop.height()-80)
         self.move(0, 0)
@@ -199,8 +217,8 @@ class WineClassify(QWidget):
             self.import_method = text
         elif self.sender() == self.show_data_method_cb:
             self.show_data_method = text
-        elif self.sender() == self.figure_type_cb:
-            self.figure_type = text
+        elif self.sender() == self.test_figure_type_cb:
+            self.test_figure_type = text
         elif self.sender() == self.classify_type_cb:
             self.classify_method = text
             self.model_trained = False
@@ -251,8 +269,9 @@ class WineClassify(QWidget):
     def link_data(self):
         print("linking data")
         # self.info_data = pd.read_excel("data\\wine_i.xlsx")
-        # self.label_data = pd.read_excel("data\\wine_label.xlsx")
-        # self.all_train_data = pd.read_excel("data\\wine_train.xlsx")
+        self.label_data = pd.read_excel("data\\wine_label.xlsx")
+        self.all_train_data = pd.read_excel("data\\wine_train.xlsx")
+        self.all_test_data = pd.read_excel("data\\wine_train.xlsx")
         # self.all_test_data = pd.read_excel("data\\wine_test_single1.xlsx")
         # self.label_data = pd.read_excel("data\\wine_l.xlsx")
         # self.all_train_data = pd.read_excel("data\\wine_d.xlsx")
@@ -406,12 +425,12 @@ class WineClassify(QWidget):
             else:
                 data = self.test_data.iloc[:, n:].T
             # print(data)
-            if self.figure_type == self.figure_types[0]:
+            if self.test_figure_type == self.test_figure_types[0]:
                 data.plot(kind='line', ax=self.ax, rot=90, xticks=range(len(data.index)), fontsize=10)
                 # pass
-            elif self.figure_type == self.figure_types[1]:
+            elif self.test_figure_type == self.test_figure_types[1]:
                 data.plot(kind='bar', ax=self.ax, fontsize=10)
-            elif self.figure_type == self.figure_types[2]:
+            elif self.test_figure_type == self.test_figure_types[2]:
                 data.plot(kind='area', ax=self.ax, rot=90, xticks=range(len(data.index)), fontsize=10)
 
             # plt.xlabel(data.index.tolist())
@@ -450,7 +469,7 @@ class WineClassify(QWidget):
             lower_train_data = self.pca_train(train_data)
             self.svm_train(lower_train_data, train_label)
         elif self.classify_method == self.classify_methods[5]:
-            lower_train_data = self.spca_train(train_data)
+            lower_train_data = self.spca_train(train_data, train_label)
             self.svm_train(lower_train_data, train_label)
 
         elif self.classify_method == self.classify_methods[6]:
@@ -461,10 +480,12 @@ class WineClassify(QWidget):
             # print(type(train_data))
             # print(type(lower_train_data))
         elif self.classify_method == self.classify_methods[8]:
-            lower_train_data = self.spca_train(train_data)
+            lower_train_data = self.spca_train(train_data, train_label)
             self.bp_train(lower_train_data, train_label)
             # print(type(train_data))
             # print(type(lower_train_data))
+        elif self.classify_method == self.classify_methods[9]:
+            self.new_train(train_data, train_label)
         else:
             pass
 
@@ -494,7 +515,7 @@ class WineClassify(QWidget):
             lower_test_data = self.pca_test(test_data)
             results = self.knn_test(lower_train_data, train_label, lower_test_data)
         elif self.classify_method == self.classify_methods[2]:
-            lower_train_data = self.spca_train(train_data)
+            lower_train_data = self.spca_train(train_data, train_label)
             lower_test_data = self.spca_test(test_data)
             results = self.knn_test(lower_train_data, train_label, lower_test_data)
         elif self.classify_method == self.classify_methods[3]:
@@ -513,6 +534,8 @@ class WineClassify(QWidget):
         elif self.classify_method == self.classify_methods[8]:
             lower_test_data = self.spca_test(test_data)
             results = self.bp_test(lower_test_data)
+        elif self.classify_method == self.classify_methods[9]:
+            results = self.new_test(test_data)
         else:
             pass
 
@@ -668,32 +691,44 @@ class WineClassify(QWidget):
         lower_pca_data -= np.mean(lower_pca_data, axis=0)
         return lower_pca_data
 
-    def spca_train(self, train_data):
+    def spca_train(self, train_data, train_label):
         print("spca training")
+        # std = StandardScaler()
+        # train_data = std.fit_transform(train_data)
         train_data -= np.mean(train_data, axis=0)
         # train_data /= np.std(train_data, axis=0)
         # rng = np.random.RandomState(0)
-        self.spca_model = SparsePCA(n_components=self.pca_top, random_state=0, ridge_alpha=0.1)
+        self.spca_model = SparsePCA(n_components=self.pca_top, random_state=0, alpha=0, ridge_alpha=0)
         self.spca_model.fit(train_data)
+        # self.spca_model.fit(train_data, train_label)
         lower_spca_data = self.spca_model.transform(train_data)
+        # lower_spca_data = std.fit_transform(lower_spca_data)
         # print(type(lower_spca_data))
-        # print(np.shape(lower_spca_data))
+        print(np.shape(lower_spca_data))
         # max = np.max(lower_spca_data)
         # print(max)
         # lower_spca_data /= max
-        lower_spca_data /= lower_spca_data[0,0]
+        lower_spca_data /= max(np.abs(lower_spca_data[0,0]), 0.01)
+        # lower_spca_data -= np.mean(lower_spca_data, axis=0)
+        # normalize(lower_spca_data, axis=0)
         # print(np.shape(lower_spca_data))
-        # print(lower_spca_data)
+        print(lower_spca_data)
         return lower_spca_data
 
     def spca_test(self, test_data):
         print("spca testing")
+        # std = StandardScaler()
+        # test_data = std.fit_transform(test_data)
         test_data -= np.mean(test_data, axis=0)
         lower_spca_data = self.spca_model.transform(test_data)
+        # lower_spca_data = std.fit_transform(lower_spca_data)
+        print(np.shape(lower_spca_data))
         # max = np.max(lower_spca_data)
         # lower_spca_data /= max
+        lower_spca_data /= max(np.abs(lower_spca_data[0,0]), 0.01)
+        # lower_spca_data -= np.mean(lower_spca_data, axis=0)
+        # normalize(lower_spca_data, axis=0)
         print(lower_spca_data)
-        lower_spca_data /= max(lower_spca_data[0,0], 0.001)
         # lower_spca_data2 = self.spca_model.transform(test_data[0:5])
         # lower_spca_data2 /= lower_spca_data2[0,0]
         # print(lower_spca_data2)
@@ -752,14 +787,16 @@ class WineClassify(QWidget):
     def bp_train(self, train_data, train_label):
         print("bp training")
         train_data -= np.mean(train_data, axis=0)
+        # train_label_fit = LabelBinarizer().fit_transform(train_label)
+        self.bp_model = MLPClassifier(random_state = 1, max_iter=self.bp_epoch ,learning_rate_init=self.bp_lr, hidden_layer_sizes=(self.bp_layers))
+        self.bp_model.fit(train_data, train_label)
         # train_data -= np.min(train_data)
         # train_data /= np.max(train_data)
         # print(np.shape(train_label))
         # print(train_label)
-        train_label_fit = LabelBinarizer().fit_transform(train_label)
-        layers = [np.shape(train_data)[1], self.bp_neuron_num, 4]
-        self.bp_model = bp.NeuralNetwork(layers, 'logistic')
-        self.bp_model.fit(train_data, train_label_fit, learning_rate=self.bp_lr, epochs=self.bp_epoch)
+        # layers = [np.shape(train_data)[1], self.bp_neuron_num, 4]
+        # self.bp_model = NeuralNetwork(layers, 'logistic')
+        # self.bp_model.fit(train_data, train_label_fit, learning_rate=self.bp_lr, epochs=self.bp_epoch)
 
     # BP测试模块
     def bp_test(self, test_data):
@@ -769,14 +806,34 @@ class WineClassify(QWidget):
         # test_data -= np.min(test_data)
         # test_data /= np.max(test_data)
         model = self.bp_model
+        result = self.bp_model.predict(test_data)
         # print(model.trained)
-        result = []
-        for i in range(np.shape(test_data)[0]):
-            # print(type(test_data[i]))
-            o = model.predict(test_data[i])
+        # result = []
+        # for i in range(np.shape(test_data)[0]):
+        #     print(type(test_data[i]))
+            # o = model.predict(test_data[i])
             # np.argmax:第几个数对应最大概率值
-            result.append(np.argmax(o))
+            # result.append(np.argmax(o))
             # print(results)
+        return result
+
+    def new_train(self, train_data, train_label):
+        # classifiers = [
+        #     KNeighborsClassifier(self.knn_top),
+        #     SVC(kernel="linear", C=0.025),
+        #     SVC(gamma=2, C=1),
+        #     GaussianProcessClassifier(1.0 * RBF(1.0)),
+        #     DecisionTreeClassifier(max_depth=self.dt_depth),
+        #     RandomForestClassifier(max_depth=5, n_estimators=10, max_features=1),
+        #     MLPClassifier(alpha=1, learning_rate_init=self.bp_lr, max_iter=self.bp_epoch),
+        #     AdaBoostClassifier(),
+        #     GaussianNB(),
+        #     QuadraticDiscriminantAnalysis()]
+        self.new_model = DecisionTreeClassifier(max_depth=self.dt_depth)
+        self.new_model.fit(train_data, train_label)
+
+    def new_test(self, test_data):
+        result = self.new_model.predict(test_data)
         return result
 
     # 计算精度
@@ -811,14 +868,19 @@ class WineClassify(QWidget):
     # 改变设置
     def change_setting(self):
         print("changing settings")
-        self.theme = self.setting_widget.theme_cb.currentText()
-        self.pca_top = int(self.setting_widget.pca_top_le.text())
-        self.knn_top = int(self.setting_widget.knn_top_le.text())
-        self.bp_lr = float(self.setting_widget.bp_lr_le.text())
-        self.bp_epoch = int(self.setting_widget.bp_epoch_le.text())
-        self.svm_type = self.setting_widget.svm_type_cb.currentText()
-        self.model_trained = False
-        self.data_classified = False
+        try:
+            self.theme = self.setting_widget.theme_cb.currentText()
+            self.pca_top = int(self.setting_widget.pca_top_le.text())
+            self.knn_top = int(self.setting_widget.knn_top_le.text())
+            self.bp_lr = float(self.setting_widget.bp_lr_le.text())
+            self.bp_epoch = int(self.setting_widget.bp_epoch_le.text())
+            self.bp_layers = int(self.setting_widget.bp_layers_le.text())
+            self.dt_depth = int(self.setting_widget.dt_depth_le.text())
+            self.svm_type = self.setting_widget.svm_type_cb.currentText()
+            self.model_trained = False
+            self.data_classified = False
+        except:
+            self.reset_setting()
         # print(self.theme, self.pca_top, self.knn_top, self.svm_type, self.bp_lr, self.bp_epoch)
         if self.theme == self.themes[0]:
             # self.setStyle(QStyleFactory.create("Windows"))
@@ -849,12 +911,13 @@ class WineClassify(QWidget):
         self.pca_top = 12
         self.knn_top = 7
         self.bp_lr = 0.1
-        self.bp_epoch = 30000
-        self.bp_neuron_num = 150
+        self.bp_layers = 100
+        self.bp_epoch = 3000
+        self.dt_depth = 10
         self.svm_type = self.svm_types[0]
         self.setting_widget.pca_top_le.setText(str(self.pca_top))
         self.setting_widget.knn_top_le.setText(str(self.knn_top))
-        self.setting_widget.bp_epoch_le.setText(str(self.bp_epoch))
+        self.setting_widget.bp_layers_le.setText(str(self.bp_layers))
         self.setting_widget.bp_lr_le.setText(str(self.bp_lr))
         self.setting_widget.svm_type_cb.setCurrentText(self.svm_type)
         self.setting_widget.theme_cb.setCurrentText(self.theme)
@@ -1005,7 +1068,11 @@ class Setting_widget(QWidget):
         self.bp_lr_le = QLineEdit("0.1")
         self.bp_lr_le.setToolTip("BP-learning rate参数（默认为0.1）")
         self.bp_epoch_le = QLineEdit("3000")
-        self.bp_epoch_le.setToolTip("BP-epoch参数（默认为3000）")
+        self.bp_epoch_le.setToolTip("BP-最大迭代次数（默认为3000）")
+        self.bp_layers_le = QLineEdit("100")
+        self.bp_layers_le.setToolTip("BP-隐藏层个数参数（默认为100）")
+        self.dt_depth_le = QLineEdit("10")
+        self.dt_depth_le.setToolTip("Desition tree深度（默认为10）")
         self.confirm_btn = QPushButton("确认")
         self.confirm_btn.clicked.connect(self.parent_widget.change_setting)
         self.cancel_btn = QPushButton("取消")
@@ -1016,16 +1083,20 @@ class Setting_widget(QWidget):
         self.pca_label = QLabel("PCA(SPCA) 主成分数量:")
         self.knn_label = QLabel("KNN 最近邻数量:")
         self.svm_label = QLabel("SVM 多分类模型类型:")
-        self.bp_lr_label = QLabel("BP:learning rate:")
-        self.bp_epoch_label = QLabel("BP:epoch:")
+        self.bp_layers_label = QLabel("BP hidden layers:")
+        self.bp_lr_label = QLabel("BP learning rate:")
+        self.bp_epoch_label = QLabel("BP max epochs:")
+        self.dt_depth_label = QLabel("Desition tree max depth:")
 
         self.setting_layout = QGridLayout()
         self.setting_layout.addWidget(self.theme_label, 1, 2)
         self.setting_layout.addWidget(self.pca_label, 3, 2)
         self.setting_layout.addWidget(self.knn_label, 4, 2)
         self.setting_layout.addWidget(self.svm_label, 5, 2)
-        self.setting_layout.addWidget(self.bp_lr_label, 6, 2)
-        self.setting_layout.addWidget(self.bp_epoch_label, 7, 2)
+        self.setting_layout.addWidget(self.bp_layers_label, 6, 2)
+        self.setting_layout.addWidget(self.bp_lr_label, 7, 2)
+        self.setting_layout.addWidget(self.bp_epoch_label, 8, 2)
+        self.setting_layout.addWidget(self.dt_depth_label, 9, 2)
         self.setting_layout.addWidget(self.confirm_btn, 1, 8)
         self.setting_layout.addWidget(self.cancel_btn, 2, 8)
         self.setting_layout.addWidget(self.reset_btn, 3, 8)
@@ -1033,8 +1104,10 @@ class Setting_widget(QWidget):
         self.setting_layout.addWidget(self.pca_top_le, 3, 3)
         self.setting_layout.addWidget(self.knn_top_le, 4, 3)
         self.setting_layout.addWidget(self.svm_type_cb, 5, 3)
-        self.setting_layout.addWidget(self.bp_lr_le, 6, 3)
-        self.setting_layout.addWidget(self.bp_epoch_le, 7, 3)
+        self.setting_layout.addWidget(self.bp_layers_le, 6, 3)
+        self.setting_layout.addWidget(self.bp_lr_le, 7, 3)
+        self.setting_layout.addWidget(self.bp_epoch_le, 8, 3)
+        self.setting_layout.addWidget(self.dt_depth_le, 9, 3)
         self.setting_layout.setRowStretch(0, 1)
         self.setting_layout.setRowStretch(1, 1)
         self.setting_layout.setRowStretch(2, 1)
