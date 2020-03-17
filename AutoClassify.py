@@ -3,6 +3,7 @@
 import sys
 import os
 import random
+import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -16,27 +17,18 @@ import pandas as pd
 from pandas.api.types import is_numeric_dtype
 from sklearn import svm
 from sklearn.decomposition import SparsePCA
-from sklearn.datasets import make_moons, make_circles, make_classification
 from sklearn.neural_network import MLPClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import classification_report
+# from sklearn.datasets import make_moons, make_circles, make_classification
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from sklearn.gaussian_process import GaussianProcessClassifier
 from sklearn.gaussian_process.kernels import RBF
-from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
-from sklearn.metrics import classification_report
 
-# 原酒鉴评规则
-# TY级酒分段93分以上
-# YY级酒分段88 - 92.9
-# 分
-# RY级酒分段80 - 87.9
-# 分
-# SY级酒分段70 - 79.9
-# 分
-#
 
 class WineClassify(QWidget):
     def __init__(self):
@@ -49,6 +41,7 @@ class WineClassify(QWidget):
         self.init_ui()
 
     def init_ui(self):
+        warnings.filterwarnings('ignore')
         self.input_data = pd.DataFrame()
         self.info_data = pd.DataFrame()
         self.label_data = pd.DataFrame()
@@ -67,14 +60,14 @@ class WineClassify(QWidget):
         # self.bp_epoch = 10000
         # self.svm_type = self.svm_types[0]
         #
-        self.messages = ['请导入Excel文件', '请导入包含感官鉴定的有效数据', '请点击链接', '请点击训练']
-        self.themes = ['浅色', '深色']
+        self.messages = ['请导入Excel文件', '请导入包含标签的有效数据', '请点击链接', '请点击训练']
+        self.themes = ['浅色', '深色', '白色']
         self.svm_types = ['ovo', 'ovr']
 
-        self.import_methods = ['导入白酒信息', '导入训练数据', '导入测试数据']
+        self.import_methods = ['导入标签信息', '导入训练数据', '导入测试数据']
         self.import_method = self.import_methods[0]
 
-        self.show_data_methods = ['显示白酒信息', '显示全部训练数据', '显示全部测试数据', '显示训练数据', '显示测试数据']
+        self.show_data_methods = ['显示标签信息', '显示全部训练数据', '显示全部测试数据', '显示训练数据', '显示测试数据']
         self.show_data_method = self.show_data_methods[0]
 
         self.data_linked = False
@@ -87,8 +80,10 @@ class WineClassify(QWidget):
         self.model_trained = False
         self.data_classified = False
 
-        self.classify_methods = ['KNN', 'PCA-KNN', 'sPCA-KNN', 'SVM',
-                                 'PCA-SVM', 'sPCA-SVM', 'BP', 'PCA-BP', 'sPCA-BP', 'Desition Tree']
+        self.classify_methods = ['KNN', 'PCA-KNN', 'sPCA-KNN', 'SVM', 'PCA-SVM', 'sPCA-SVM',
+                                 'BP', 'PCA-BP', 'sPCA-BP', 'Decision Tree', 'PCA-DT', 'SPCA-DT']
+        # self.classify_methods = ['KNN', 'PCA-KNN', 'sPCA-KNN', 'SVM',
+        #                          'PCA-SVM', 'sPCA-SVM', 'BP', 'PCA-BP', 'sPCA-BP']
         # self.classify_methods = ['KNN', 'PCA-KNN', 'SVM', 'PCA-SVM', 'BP', 'PCA-BP']
         self.classify_method = self.classify_methods[0]
 
@@ -172,7 +167,7 @@ class WineClassify(QWidget):
         self.button_layout.addWidget(self.train_btn)
         self.button_layout.addWidget(self.classify_btn)
         self.button_layout.addWidget(self.classify_type_cb)
-        # self.button_layout.addWidget(self.result_figure_type_cb)
+        self.button_layout.addWidget(self.result_figure_type_cb)
         self.button_layout.addWidget(self.settint_btn)
         self.button_layout.addWidget(self.save_btn)
         self.button_layout.addWidget(self.clear_btn)
@@ -204,7 +199,7 @@ class WineClassify(QWidget):
         self.setLayout(self.layout)
 
         self.button_widget.setFixedHeight(60)
-        self.setWindowTitle('基酒等级智能鉴定系统')
+        self.setWindowTitle('基酒等级自动分类系统')
         self.setWindowIcon(QIcon('themes\\wine.ico'))
         desktop = QApplication.desktop()
         self.resize(desktop.width(), desktop.height()-80)
@@ -219,6 +214,8 @@ class WineClassify(QWidget):
             self.show_data_method = text
         elif self.sender() == self.test_figure_type_cb:
             self.test_figure_type = text
+        elif self.sender() == self.result_figure_type_cb:
+            self.result_figure_type = text
         elif self.sender() == self.classify_type_cb:
             self.classify_method = text
             self.model_trained = False
@@ -232,7 +229,7 @@ class WineClassify(QWidget):
             self.show_message(self.messages[0])
         else:
             try:
-                self.input_data = pd.read_excel(file_name, encoding="utf-8")
+                self.input_data = pd.read_excel(file_name, encoding="utf-8").fillna("未知")
             except BaseException:
                 self.show_message("数据读取失败")
             else:
@@ -243,13 +240,13 @@ class WineClassify(QWidget):
                 else:
                     # self.import_methods = ['导入白酒信息', '导入训练数据', '导入测试数据']
                     if self.import_method == self.import_methods[0]:
-                        if '感官鉴定' in self.input_data.columns:
+                        if '标签' in self.input_data.columns:
                             self.show_message("已" + self.import_method)
                             self.data_linked = False
                             self.label_data = self.input_data
                             self.show_data(self.label_data)
                         else:
-                            self.show_message("请导入包含感官鉴定的白酒信息")
+                            self.show_message("请导入包含标签列的白酒信息")
                     elif self.import_method == self.import_methods[1]:
                         self.show_message("已" + self.import_method)
                         self.data_linked = False
@@ -269,9 +266,9 @@ class WineClassify(QWidget):
     def link_data(self):
         print("linking data")
         # self.info_data = pd.read_excel("data\\wine_i.xlsx")
-        self.label_data = pd.read_excel("data\\wine_label.xlsx")
-        self.all_train_data = pd.read_excel("data\\wine_train.xlsx")
-        self.all_test_data = pd.read_excel("data\\wine_train.xlsx")
+        # self.label_data = pd.read_excel("data\\wine_label.xlsx").fillna("未知")
+        # self.all_train_data = pd.read_excel("data\\wine_train.xlsx").fillna("未知")
+        # self.all_test_data = pd.read_excel("data\\wine_train.xlsx").fillna("未知")
         # self.all_test_data = pd.read_excel("data\\wine_test_single1.xlsx")
         # self.label_data = pd.read_excel("data\\wine_l.xlsx")
         # self.all_train_data = pd.read_excel("data\\wine_d.xlsx")
@@ -330,12 +327,12 @@ class WineClassify(QWidget):
 
             cols = self.all_train_data.columns.tolist()[self.label_data.shape[1]:]
             cols.insert(0, '编号')
-            cols.insert(1, '感官鉴定')
-            self.train_data = self.all_train_data.loc[self.all_train_data['感官鉴定'].isin(self.wine_grades), cols]
+            cols.insert(1, '标签')
+            self.train_data = self.all_train_data.loc[self.all_train_data['标签'].isin(self.wine_grades), cols]
 
             cols = self.all_test_data.columns.tolist()[self.label_data.shape[1]:]
             cols.insert(0, '编号')
-            cols.insert(1, '感官鉴定')
+            cols.insert(1, '标签')
             self.test_data = self.all_test_data[cols]
 
             # if 'results' in self.test_data.columns:
@@ -454,7 +451,7 @@ class WineClassify(QWidget):
         # self.classify_methods =
         # ['KNN', 'PCA-KNN', 'sPCA-KNN', 'SVM', 'PCA-SVM', 'sPCA-SVM', 'BP', 'PCA-BP', 'sPCA-BP']
         train_data = self.train_data.iloc[:, 2:].values
-        train_label = [self.wine_grades.index(grade) for grade in self.train_data['感官鉴定'].values]
+        train_label = [self.wine_grades.index(grade) for grade in self.train_data['标签'].values]
         # start training
         if self.classify_method == self.classify_methods[0]:
             pass
@@ -486,6 +483,12 @@ class WineClassify(QWidget):
             # print(type(lower_train_data))
         elif self.classify_method == self.classify_methods[9]:
             self.new_train(train_data, train_label)
+        elif self.classify_method == self.classify_methods[10]:
+            lower_train_data = self.pca_train(train_data)
+            self.new_train(lower_train_data, train_label)
+        elif self.classify_method == self.classify_methods[11]:
+            lower_train_data = self.spca_train(train_data, train_label)
+            self.new_train(lower_train_data, train_label)
         else:
             pass
 
@@ -499,15 +502,15 @@ class WineClassify(QWidget):
             self.show_message("请训练模型")
             return
         print("testing")
-        if '智能鉴定' in self.test_data.columns:
-            self.test_data.drop('智能鉴定', axis=1, inplace=True)
-        if '智能得分' in self.test_data.columns:
-            self.test_data.drop('智能得分', axis=1, inplace=True)
+        if '分类' in self.test_data.columns:
+            self.test_data.drop('分类', axis=1, inplace=True)
+        if '得分' in self.test_data.columns:
+            self.test_data.drop('得分', axis=1, inplace=True)
         # self.classify_methods =
         # ['KNN', 'PCA-KNN', 'sPCA-KNN', 'SVM', 'PCA-SVM', 'sPCA-SVM', 'BP', 'PCA-BP', 'sPCA-BP']
         test_data = self.test_data.iloc[:, 2:].values
         train_data = self.train_data.iloc[:, 2:].values
-        train_label = [self.wine_grades.index(grade) for grade in self.train_data['感官鉴定'].values]
+        train_label = [self.wine_grades.index(grade) for grade in self.train_data['标签'].values]
         if self.classify_method == self.classify_methods[0]:
             results = self.knn_test(train_data, train_label, test_data)
         elif self.classify_method == self.classify_methods[1]:
@@ -536,20 +539,24 @@ class WineClassify(QWidget):
             results = self.bp_test(lower_test_data)
         elif self.classify_method == self.classify_methods[9]:
             results = self.new_test(test_data)
+        elif self.classify_method == self.classify_methods[10]:
+            lower_test_data = self.pca_test(test_data)
+            results = self.new_test(lower_test_data)
+        elif self.classify_method == self.classify_methods[11]:
+            lower_test_data = self.spca_test(test_data)
+            results = self.new_test(lower_test_data)
         else:
             pass
+        print("result figuring")
 
         self.data_classified = True
         result_visual = [self.wine_grades[result] for result in results]
         result_marks = [self.wine_marks[result] + random.randint(1, 8) for result in results]
-        if '智能鉴定' in self.test_data.columns:
-            self.test_data.drop('智能鉴定', axis=1, inplace=True)
-        self.test_data.insert(1, '智能鉴定', result_visual)
-        if '智能得分' in self.test_data.columns:
-            self.test_data.drop('智能得分', axis=1, inplace=True)
-        self.test_data.insert(2, '智能得分', result_marks)
+        self.test_data = self.test_data.copy()
+        self.test_data.insert(1, '分类', result_visual)
+        self.test_data.insert(2, '得分', result_marks)
 
-        all_test_label_visual = self.test_data['感官鉴定']
+        all_test_label_visual = self.test_data['标签']
         test_label = [self.wine_grades.index(grade) for grade in all_test_label_visual if grade in self.wine_grades]
         test_result = [results[i] for i in range(len(all_test_label_visual)) if all_test_label_visual[i] in self.wine_grades]
         predict_result = [results[i] for i in range(len(all_test_label_visual)) if all_test_label_visual[i] not in self.wine_grades]
@@ -558,30 +565,49 @@ class WineClassify(QWidget):
         plt.rcParams['font.sans-serif']=['SimHei'] #指定默认字体,SimHei为黑体
         # 解决无法显示负号
         plt.rcParams['axes.unicode_minus'] = False
-        legend = []
-        if(len(test_result) > 0):
-            result_mat, result_report = self.precision(test_label, test_result)
-            result_mat.T.plot(kind='line', ax=self.ax, rot=90, xticks=range(len(result_mat.index)), fontsize=14)
-            plt.text(1.5, max(result_mat.max()) / 2, result_report, fontsize=12)
-            legend.extend(self.wine_grades)
+        if self.result_figure_type == self.result_figure_types[0]:
+            legend = []
+            if(len(test_result) > 0):
+                result_mat, result_report = self.precision(test_label, test_result)
+                result_mat.T.plot(kind='line', ax=self.ax, rot=90, xticks=range(len(result_mat.index)), fontsize=14)
+                plt.text(1.5, max(result_mat.max()) / 2, result_report, fontsize=12)
+                legend.extend(self.wine_grades)
 
-        if(len(predict_result) > 0):
-            dict = {}
-            for key in predict_result:
-                dict[key] = dict.get(key, 0) + 1
-            for i in range(4):
-                if i not in dict.keys():
-                    dict[i] = 0
-            # print(dict)
-            predict = [dict[i] for i in range(4)]
-            p_mat = pd.DataFrame(predict)
-            # print(p_mat)
-            p_mat.plot(kind='line', ax=self.ax, rot=90, xticks=range(4), fontsize=14)
-            # plt.plot(range(4), predict)
-            plt.xlim(0, 3)
-            legend.append("未知")
-        self.ax.set_xticklabels(self.wine_grades)
-        plt.legend(legend)
+            if(len(predict_result) > 0):
+                dict = {}
+                for key in predict_result:
+                    dict[key] = dict.get(key, 0) + 1
+                for i in range(4):
+                    if i not in dict.keys():
+                        dict[i] = 0
+                # print(dict)
+                predict = [dict[i] for i in range(4)]
+                p_mat = pd.DataFrame(predict)
+                # print(p_mat)
+                p_mat.plot(kind='line', ax=self.ax, rot=90, xticks=range(4), fontsize=14)
+                # plt.plot(range(4), predict)
+                plt.xlim(0, 3)
+                legend.append("未知")
+            self.ax.set_xticklabels(self.wine_grades)
+            plt.legend(legend)
+        elif self.result_figure_type == self.result_figure_types[1]:
+            y_labels = [' ']
+            y_labels.extend(self.wine_grades)
+            y_labels.append("未知")
+            # print(y_labels)
+            all_label = [y_labels.index(grade)-1 for grade in all_test_label_visual if grade in y_labels]
+            # print(len(all_label))
+            # print(len(results))
+            plt.scatter(range(len(results)), all_label, marker='o', c='red')
+            plt.scatter(range(len(results)), results, marker='x', c='blue')
+            plt.legend(["分类标签", "分类结果"])
+            plt.xlabel("测试数据")
+            plt.ylabel("等级分类")
+            plt.ylim(-0.5, 4.5)
+            self.ax.set_yticklabels(y_labels)
+            self.ax.xaxis.set_major_locator(plt.MultipleLocator(10))
+            self.ax.yaxis.set_major_locator(plt.MultipleLocator(1))
+            # self.ax.set_xticklabels(range(len(results)))
 
         self.table.setVisible(False)
         self.setting_widget.setVisible(False)
@@ -704,7 +730,7 @@ class WineClassify(QWidget):
         lower_spca_data = self.spca_model.transform(train_data)
         # lower_spca_data = std.fit_transform(lower_spca_data)
         # print(type(lower_spca_data))
-        print(np.shape(lower_spca_data))
+        # print(np.shape(lower_spca_data))
         # max = np.max(lower_spca_data)
         # print(max)
         # lower_spca_data /= max
@@ -712,7 +738,7 @@ class WineClassify(QWidget):
         # lower_spca_data -= np.mean(lower_spca_data, axis=0)
         # normalize(lower_spca_data, axis=0)
         # print(np.shape(lower_spca_data))
-        print(lower_spca_data)
+        # print(lower_spca_data)
         return lower_spca_data
 
     def spca_test(self, test_data):
@@ -722,13 +748,13 @@ class WineClassify(QWidget):
         test_data -= np.mean(test_data, axis=0)
         lower_spca_data = self.spca_model.transform(test_data)
         # lower_spca_data = std.fit_transform(lower_spca_data)
-        print(np.shape(lower_spca_data))
+        # print(np.shape(lower_spca_data))
         # max = np.max(lower_spca_data)
         # lower_spca_data /= max
         lower_spca_data /= max(np.abs(lower_spca_data[0,0]), 0.01)
         # lower_spca_data -= np.mean(lower_spca_data, axis=0)
         # normalize(lower_spca_data, axis=0)
-        print(lower_spca_data)
+        # print(lower_spca_data)
         # lower_spca_data2 = self.spca_model.transform(test_data[0:5])
         # lower_spca_data2 /= lower_spca_data2[0,0]
         # print(lower_spca_data2)
@@ -764,7 +790,7 @@ class WineClassify(QWidget):
         print("svm training")
         # train_data -= np.mean(train_data, axis=0)
         # train_data /= np.std(train_data, axis=0)
-        self.svm_model = svm.SVC(decision_function_shape=self.svm_type)
+        self.svm_model = svm.SVC(decision_function_shape=self.svm_type, gamma='auto')
         # print(np.shape(train_data))
         # print(np.shape(train_label))
         # print("label: ", train_label)
@@ -847,8 +873,8 @@ class WineClassify(QWidget):
                 m[test_label[i], test_result[i]] += 1
             result_mat = pd.DataFrame(m)
             result_report = classification_report(test_label, test_result)
-            print(m)
-            print(result_mat)
+            # print(m)
+            # print(result_mat)
             print(result_report)
             return result_mat, result_report
         else:
@@ -886,12 +912,13 @@ class WineClassify(QWidget):
             # self.setStyle(QStyleFactory.create("Windows"))
             self.setStyleSheet("QWidget{color: black; background-color:#e0eaef;}QPushButton, QComboBox, QLineEdit{background-color: #d0dadf}")
             plt.cla()
-            plt.style.use('themes\\qwhite_color')
+            plt.style.use('themes\\qlight_color')
             # plt.gcf().set_textcolor('black')
             plt.gcf().set_facecolor('#e0eaef')
             plt.gca().set_facecolor('#e0eaef')
             # plt.gcf().set_edgecolor('#e0eaef')
         elif self.theme == self.themes[1]:
+            # self.themes = ['浅色', '深色', '白色']
             # self.setStyleSheet(load_stylesheet_pyqt5())
             # QApplication.setStyle(QStyleFactory.create("Fusion"))
             self.setStyleSheet("QWidget{color: #b0b0b0; background-color:#203040;}QPushButton, QComboBox, QLineEdit{ background-color: #304050}")
@@ -900,6 +927,16 @@ class WineClassify(QWidget):
             # plt.gcf().set_textcolor('white')
             plt.gcf().set_facecolor('#203040')
             plt.gca().set_facecolor('#203040')
+        elif self.theme == self.themes[2]:
+            # self.themes = ['浅色', '深色', '白色']
+            # self.setStyleSheet(load_stylesheet_pyqt5())
+            # QApplication.setStyle(QStyleFactory.create("Fusion"))
+            self.setStyleSheet("QWidget{color: black; background-color:white;}QPushButton, QComboBox, QLineEdit{ background-color: white}")
+            plt.cla()
+            plt.style.use('themes\\qwhite_color')
+            # plt.gcf().set_textcolor('white')
+            plt.gcf().set_facecolor('white')
+            plt.gca().set_facecolor('white')
         # self.show()
         self.model_trained = False
         self.show_message("已改变设置")
@@ -924,7 +961,7 @@ class WineClassify(QWidget):
         # print(self.theme, self.pca_top, self.knn_top, self.svm_type, self.bp_lr, self.bp_epoch)
         self.setStyleSheet("QWidget{color: black; background-color:#e0eaef;}QPushButton, QComboBox, QLineEdit{background-color: #d0dadf}")
         plt.cla()
-        plt.style.use('themes\\qwhite_color')
+        plt.style.use('themes\\qlight_color')
         plt.gcf().set_facecolor('#e0eaef')
         plt.gca().set_facecolor('#e0eaef')
         self.model_trained = False
@@ -1051,7 +1088,8 @@ class Setting_widget(QWidget):
         super().__init__()
         # settings self.themes
         self.parent_widget = parent
-        self.themes = ['浅色', '深色']
+        # self.themes = ['浅色', '深色']
+        self.themes = ['浅色', '深色', '白色']
         self.theme = self.themes[1]
         self.theme_cb = QComboBox()
         self.theme_cb.setStatusTip("选择主题")
